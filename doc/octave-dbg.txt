@@ -1,0 +1,608 @@
+*octave-dbg.txt*        Octave REPL and debugger for Neovim
+
+                                                        *octave-dbg*
+                                                        *octave_dbg*
+
+octave-dbg.nvim drives Octave's own command-line debugger (`dbstop`,
+`dbstep`, `dbcont`, `dbquit`) through one terminal job. It sends lines,
+selections and `%%` cells to the REPL, runs files, sets breakpoints with
+signs, marks the line where the debugger stopped, shows the variables in a
+panel that refreshes itself, and shows values and help in popups.
+
+It is pure Lua, needs Neovim 0.10 or newer and GNU Octave, and has no other
+dependencies.
+
+==============================================================================
+CONTENTS                                               *octave-dbg-contents*
+
+  1. Setup ..................................... |octave-dbg-setup|
+  2. Command ................................... |:OctaveDbg|
+  3. Options ................................... |octave-dbg-options|
+  4. Keymaps ................................... |octave-dbg-keymaps|
+  5. Lua API ................................... |octave-dbg-api|
+  6. Current-line marker ....................... |octave-dbg-marker|
+  7. Variables panel ........................... |octave-dbg-panel|
+  8. Hover ..................................... |octave-dbg-hover|
+  9. Breakpoints ............................... |octave-dbg-breakpoints|
+ 10. Events and highlights ..................... |octave-dbg-events|
+ 11. Health check .............................. |octave-dbg-health|
+ 12. Octave notes and limits ................... |octave-dbg-notes|
+
+==============================================================================
+1. SETUP                                                  *octave-dbg-setup*
+
+With lazy.nvim: >lua
+
+    {
+      "todorovski-m/octave-dbg.nvim",
+      ft = { "octave", "matlab" },
+      cmd = "OctaveDbg",
+      opts = { setup_keymap = true, matlab_keys = true },
+    }
+<
+Without a plugin manager, put the plugin on 'runtimepath' and, if you want
+to change options, call: >lua
+
+    require("octave_dbg").setup({ setup_keymap = true })
+<
+The command and the autocommands also work when `setup()` is never called.
+`setup()` only changes options and creates the optional keymaps.
+
+==============================================================================
+2. COMMAND                                                      *:OctaveDbg*
+
+:OctaveDbg {subcommand} [args]
+
+One command with subcommands. <Tab> completes the subcommand names. Without
+a subcommand, it runs `status`.
+
+:OctaveDbg repl                                            *:OctaveDbg-repl*
+    Open the REPL in a split (option `split`), or show it again when its
+    window was closed. Focus stays in the current window. When no job is
+    running, a new one starts and the restart counter is reset.
+
+:OctaveDbg send                                            *:OctaveDbg-send*
+:{range}OctaveDbg send
+    Send the cursor line, or the lines in {range}, for example
+    `:'<,'>OctaveDbg send`.
+
+:OctaveDbg cell                                            *:OctaveDbg-cell*
+    Send the cell under the cursor. A cell starts after a line that matches
+    `cell_delimiter` and ends before the next one. The text before the first
+    delimiter is a cell too.
+
+:OctaveDbg run                                              *:OctaveDbg-run*
+    Save the buffer if it is modified, then send
+    `run('<absolute path>')`. For a script with breakpoints, this starts a
+    debug session. Right after a save, it waits until the breakpoints that
+    Octave dropped on the save have been sent again (about 1.1 seconds).
+
+:OctaveDbg runto                                          *:OctaveDbg-runto*
+    Run the file, or continue when the debugger is stopped, until the cursor
+    line (MATLAB "Run to Cursor"). See |octave-dbg-run-to-cursor|.
+
+:OctaveDbg interrupt                                  *:OctaveDbg-interrupt*
+    Send Ctrl+C to Octave. This stops a running command, such as a long
+    loop or `pause`, like Ctrl+C in MATLAB's Command Window.
+
+:OctaveDbg break [N]                                      *:OctaveDbg-break*
+    Toggle a breakpoint on the cursor line, or on line [N]. The buffer is
+    saved first if it is modified. See |octave-dbg-breakpoints|.
+
+:OctaveDbg step                                            *:OctaveDbg-step*
+:OctaveDbg in                                                *:OctaveDbg-in*
+:OctaveDbg out                                              *:OctaveDbg-out*
+    Send `dbstep`, `dbstep in` or `dbstep out`.
+
+:OctaveDbg continue                                    *:OctaveDbg-continue*
+:OctaveDbg quit                                            *:OctaveDbg-quit*
+    Send `dbcont` or `dbquit`.
+
+:OctaveDbg clear                                          *:OctaveDbg-clear*
+    Remove all breakpoints: clear the signs and send `dbclear all`. This does
+    not clear the workspace, as Octave's own `clear` would.
+
+:OctaveDbg whos                                            *:OctaveDbg-whos*
+:OctaveDbg clc                                              *:OctaveDbg-clc*
+:OctaveDbg close                                          *:OctaveDbg-close*
+    Send `whos`, `clc` or `close all`.
+
+:OctaveDbg panel                                          *:OctaveDbg-panel*
+    Toggle the variables panel. See |octave-dbg-panel|.
+
+:OctaveDbg hover                                          *:OctaveDbg-hover*
+    Show the variable or struct field under the cursor in a popup. See
+    |octave-dbg-hover|.
+
+:OctaveDbg help [name]                                     *:OctaveDbg-help*
+    Show Octave's `help` for [name], or for the name under the cursor, in a
+    popup (F1 in MATLAB). See |octave-dbg-help-popup|.
+
+:OctaveDbg status                                        *:OctaveDbg-status*
+    Show the REPL state, the Octave command, the restart count, the number
+    of commands sent, where the debugger stopped, whether the panel is open,
+    and all breakpoints.
+
+:OctaveDbg debug                                          *:OctaveDbg-debug*
+    Open a scratch buffer with the exact commands sent to Octave (oldest
+    first, with the time) and the most recent REPL output. Use it when
+    something does not work: it shows what Octave received and what it
+    answered.
+
+==============================================================================
+3. OPTIONS                                              *octave-dbg-options*
+
+Defaults: >lua
+
+    require("octave_dbg").setup({
+      cmd = { "octave", "--no-gui", "--quiet" },
+      split = "vsplit",
+      cell_delimiter = "^%%",
+      bracketed_paste = true,
+      max_restarts = 3,
+      setup_keymap = false,
+      keymap_prefix = "<leader>o",
+      filetypes = { "octave", "matlab" },
+      sign_text = "●",
+      sign_hl = "DiagnosticError",
+      log_size = 200,
+      marker = true,
+      follow = true,
+      marker_debounce = 80,
+      marker_sign_text = "▶",
+      marker_sign_hl = "DiagnosticWarn",
+      marker_line_hl = "OctaveDbgCurrentLine",
+      prompt_patterns = { "^octave:%d+>%s*$", "^>>%s*$" },
+      debug_prompt_pattern = "^debug>%s*$",
+      panel_split = "botright 10split",
+      hover_max_lines = 20,
+      hover_timeout = 1000,
+      hover_max_elements = 1000,
+      hover_border = "rounded",
+      help_max_height = 20,
+      matlab_keys = false,
+    })
+<
+                                                *octave-dbg-option-functions*
+Any option may be a function. It receives the buffer number and returns the
+value: >lua
+
+    cell_delimiter = function(bufnr)
+      return vim.bo[bufnr].filetype == "matlab" and "^%%" or "^##"
+    end
+<
+                                                    *octave-dbg-buffer-local*
+A buffer variable `vim.b.octave_dbg_<option>` overrides an option for one
+buffer: >lua
+
+    vim.b.octave_dbg_cmd = { "octave-cli" }
+<
+cmd                                                  *octave-dbg-option-cmd*
+    Command that starts Octave. A list of strings, or a string that runs
+    through the shell.
+
+split                                              *octave-dbg-option-split*
+    Ex command that opens the REPL window.
+
+cell_delimiter                            *octave-dbg-option-cell_delimiter*
+    Vim regex for the line that starts a cell.
+
+bracketed_paste                          *octave-dbg-option-bracketed_paste*
+    Wrap multi-line text in bracketed-paste escape codes, so that Octave's
+    readline reads it as one paste.
+
+max_restarts                                *octave-dbg-option-max_restarts*
+    How many times the REPL may be restarted automatically after it dies.
+    When the cap is reached, use |:OctaveDbg-repl| to start it again.
+
+setup_keymap                                *octave-dbg-option-setup_keymap*
+    Create the buffer-local keymaps in |octave-dbg-keymaps|.
+
+keymap_prefix                              *octave-dbg-option-keymap_prefix*
+    Prefix for those keymaps.
+
+filetypes                                      *octave-dbg-option-filetypes*
+    Filetypes that get the keymaps. Neovim often detects `.m` files as
+    `matlab`.
+
+sign_text, sign_hl                               *octave-dbg-option-sign_text*
+    Text and highlight group of the breakpoint sign.
+
+log_size                                        *octave-dbg-option-log_size*
+    Number of sent commands and output lines kept for |:OctaveDbg-debug|.
+
+marker                                            *octave-dbg-option-marker*
+    Show the current-line marker. See |octave-dbg-marker|.
+
+follow                                            *octave-dbg-option-follow*
+    Show the stop location in a source window and move its cursor there.
+
+marker_debounce                          *octave-dbg-option-marker_debounce*
+    Milliseconds without new REPL output before the marker is redrawn.
+
+marker_sign_text, marker_sign_hl, marker_line_hl
+                                              *octave-dbg-option-marker_sign*
+    Sign text, sign highlight group and line highlight group of the marker.
+
+prompt_patterns                          *octave-dbg-option-prompt_patterns*
+    Lua patterns for Octave's normal prompt. When the normal prompt comes
+    back, the debug session is over and the marker is removed. If you change
+    Octave's `PS1`, set this option to match.
+
+debug_prompt_pattern                *octave-dbg-option-debug_prompt_pattern*
+    Lua pattern for the debug prompt.
+
+panel_split                                  *octave-dbg-option-panel_split*
+    Ex command that opens the variables panel window.
+
+hover_max_lines                          *octave-dbg-option-hover_max_lines*
+    Most lines of `disp` output shown in the hover popup. More lines are
+    replaced by "... N more lines".
+
+hover_timeout                              *octave-dbg-option-hover_timeout*
+    Milliseconds to wait for an answer before the popup says that Octave is
+    busy. The first hover in a REPL job waits 2 seconds longer, because it
+    also starts the hook.
+
+hover_max_elements                    *octave-dbg-option-hover_max_elements*
+    Values with more elements get a summary instead of their full `disp`
+    output.
+
+hover_border                                *octave-dbg-option-hover_border*
+    Border of the hover and help popups, as for |nvim_open_win()|.
+
+help_max_height                          *octave-dbg-option-help_max_height*
+    Most lines of the help popup shown at once. Press the key again to enter
+    the popup and scroll.
+
+matlab_keys                                  *octave-dbg-option-matlab_keys*
+    MATLAB-style keys: `true`, `false`, or a table. See
+    |octave-dbg-matlab-keys|.
+
+==============================================================================
+4. KEYMAPS                                              *octave-dbg-keymaps*
+
+There are no keymaps by default. With `setup_keymap = true`, these maps are
+created in buffers of the `filetypes`, under `keymap_prefix`:
+
+    Key   Mode    Action ~
+    o     n       open REPL
+    l     n       send line
+    s     x       send selection
+    c     n       send cell
+    f     n       run file
+    w     n       whos
+    v     n       toggle variables panel
+    h     n       show variable under cursor
+    d     n       help for name under cursor
+    C     n       clc
+    x     n       close all figures
+    b     n       toggle breakpoint
+    B     n       clear all breakpoints
+    n     n       step
+    i     n       step in
+    O     n       step out
+    r     n       continue
+    t     n       run to cursor
+    k     n       interrupt (Ctrl+C)
+    q     n       quit debugging
+
+When which-key is installed (as in LazyVim), the prefix is named "Octave"
+in Octave buffers. The maps exist only in those buffers.
+
+                                                    *octave-dbg-matlab-keys*
+With `matlab_keys = true`, these keys are created in Octave buffers,
+independent of `setup_keymap`:
+
+    Key          Mode    Action ~
+    <F5>         n i     run file; continue when the debugger is stopped
+    <S-F5>       n i     quit debugging
+    <F9>         n x     send line or selection
+    <F10>        n i     step
+    <F11>        n i     step in
+    <S-F11>      n i     step out
+    <F12>        n i     toggle breakpoint
+    <C-F10>      n i     run to cursor
+    <C-CR>       n i     run section (cell)
+    <C-c>        n       interrupt
+    <F1>         n i     help for name under cursor
+
+A table changes single keys, and `false` removes one: >lua
+
+    matlab_keys = { step = "<F8>", interrupt = false }
+<
+The names are `run`, `quit`, `send`, `step`, `step_in`, `step_out`,
+`breakpoint`, `run_to_cursor`, `cell`, `interrupt` and `help`.
+
+Terminal notes:
+- <C-CR> needs a terminal that sends Ctrl+Enter as its own key. Inside
+  tmux, this needs `set -g extended-keys on`; otherwise it arrives as <CR>.
+- Some terminals send <F17> and <F23> for Shift+F5 and Shift+F11.
+- On macOS, F-keys need Fn unless "Use F1, F2, etc. keys as standard
+  function keys" is on, and F11 shows the desktop by default.
+
+To bind your own keys, use the |octave-dbg-api|.
+
+==============================================================================
+5. LUA API                                                  *octave-dbg-api*
+
+All functions are in `require("octave_dbg")`.
+
+setup({opts})                                         *octave_dbg.setup()*
+    Set the options in |octave-dbg-options|. Safe to call more than once.
+
+repl()                                                 *octave_dbg.repl()*
+    Same as |:OctaveDbg-repl|.
+
+send({text})                                           *octave_dbg.send()*
+    Send {text} to Octave and add a newline. Starts the REPL when needed.
+    Returns `true` when the text was sent.
+
+send_line()                                       *octave_dbg.send_line()*
+send_selection()                             *octave_dbg.send_selection()*
+send_cell()                                       *octave_dbg.send_cell()*
+    Send the cursor line, the visual selection (charwise, linewise or
+    blockwise; call it from a visual-mode map) or the cell under the cursor.
+
+run()                                                   *octave_dbg.run()*
+    Same as |:OctaveDbg-run|.
+
+toggle_breakpoint([{line}])               *octave_dbg.toggle_breakpoint()*
+clear_breakpoints()                       *octave_dbg.clear_breakpoints()*
+    Same as |:OctaveDbg-break| and |:OctaveDbg-clear|.
+
+step()                                                 *octave_dbg.step()*
+step_in()                                           *octave_dbg.step_in()*
+step_out()                                         *octave_dbg.step_out()*
+continue()                                         *octave_dbg.continue()*
+quit()                                                 *octave_dbg.quit()*
+    Send `dbstep`, `dbstep in`, `dbstep out`, `dbcont` or `dbquit`.
+
+whos()                                                 *octave_dbg.whos()*
+clc()                                                   *octave_dbg.clc()*
+close_figures()                               *octave_dbg.close_figures()*
+    Send `whos`, `clc` or `close all`.
+
+panel()                                               *octave_dbg.panel()*
+open_panel()                                     *octave_dbg.open_panel()*
+close_panel()                                   *octave_dbg.close_panel()*
+    Toggle, open or close the variables panel.
+
+hover()                                               *octave_dbg.hover()*
+    Same as |:OctaveDbg-hover|.
+
+help([{name}])                                         *octave_dbg.help()*
+    Same as |:OctaveDbg-help|.
+
+run_or_continue()                           *octave_dbg.run_or_continue()*
+    Continue when the debugger is stopped, else save and run the file.
+
+run_to_cursor()                               *octave_dbg.run_to_cursor()*
+interrupt()                                       *octave_dbg.interrupt()*
+    Same as |:OctaveDbg-runto| and |:OctaveDbg-interrupt|.
+
+location()                                         *octave_dbg.location()*
+    Where the debugger stopped, as `{ name = ..., line = ..., path = ... }`,
+    or `nil` when it is not stopped.
+
+status()                                             *octave_dbg.status()*
+status_lines()                                 *octave_dbg.status_lines()*
+debug()                                               *octave_dbg.debug()*
+    Same as |:OctaveDbg-status| and |:OctaveDbg-debug|. `status_lines()`
+    returns the status as a list of strings.
+
+Example: >lua
+
+    local od = require("octave_dbg")
+    vim.keymap.set("n", "<F5>", od.run)
+    vim.keymap.set("n", "<F9>", od.toggle_breakpoint)
+    vim.keymap.set("n", "<F10>", od.step)
+    vim.keymap.set("n", "<F11>", od.step_in)
+    vim.keymap.set("n", "<S-F11>", od.step_out)
+<
+==============================================================================
+6. CURRENT-LINE MARKER                                   *octave-dbg-marker*
+
+When Octave stops, it prints a line like
+>
+    stopped in demo_add at line 3 [/abs/path/demo_add.m]
+<
+The plugin reads the REPL output as it arrives and finds these lines. After
+`marker_debounce` milliseconds without new output, it marks the stop line
+with a `marker_sign_text` sign and the `marker_line_hl` line highlight.
+
+With `follow = true`, a source window shows the file and its cursor moves to
+the stop line. It uses a window that already shows the file, else the
+current window if it holds a normal file, else the first such window. A file
+that is not open yet is opened. Focus does not move, so you can keep typing
+in the REPL.
+
+The marker is removed when Octave is back at its normal prompt (see
+`prompt_patterns`) or when the REPL exits.
+
+==============================================================================
+7. VARIABLES PANEL                                        *octave-dbg-panel*
+
+|:OctaveDbg-panel| opens a split (option `panel_split`) that lists the name,
+size, class and bytes of each variable. Numbers with up to 10 elements and
+one-line strings also show their value.
+
+While the debugger is stopped, the panel shows the variables of the stopped
+frame, and its title names the function and line. Otherwise it shows the
+base workspace. It refreshes by itself each time Octave waits for input.
+Close it with |:OctaveDbg-panel| again, or with |:q| in its window.
+
+How it works: the panel and the hover share the helper
+`octave/octave_dbg_hook.m` from this plugin. It runs as an Octave input
+event hook (`add_input_event_hook`) while Octave waits at a prompt, and sees
+the workspace of that prompt. It is started with one command per REPL job,
+on the first use of the panel or the hover; that command is the only one
+echoed in the REPL. After that, Neovim controls it with files in a
+temporary folder: while the panel is open, a flag file tells the hook to
+write the variables when they change. Neovim checks that file with a timer.
+
+==============================================================================
+8. HOVER                                                  *octave-dbg-hover*
+
+|:OctaveDbg-hover| shows the variable or struct field under the cursor in a
+floating window. The window closes when the cursor moves.
+
+The name is taken from the word under the cursor and the dotted names
+before it. In `y = s.a.b + x(2)`:
+
+    Cursor on   Shows ~
+    y           y
+    s           s
+    a           s.a
+    b           s.a.b
+    x           x
+
+The popup shows the name, size, class and scope (the base workspace, or the
+function and line where the debugger stopped), then Octave's own `disp`
+output in the current `format`, without the "Columns 1 through N" splits,
+cut to `hover_max_lines` lines. A value with more than `hover_max_elements`
+elements gets a summary: min, max and mean for real numbers and logicals,
+and the top-left 5x5 part.
+
+Only names are looked up, never expressions. If the first part of the name
+is not a variable in the frame of the prompt, the popup says "not a
+variable", and nothing is run. So a function name under the cursor is never
+called. A missing field, or a field of a struct array, gives a short
+message.
+
+The value comes from the same hook as the panel (see |octave-dbg-panel|):
+Neovim writes a request file, the hook answers in another file, and Neovim
+checks for the answer every 50 milliseconds. A typical answer takes about
+0.1 seconds. The hook only runs while Octave waits at a prompt; while a
+command runs, the popup says that Octave is busy after `hover_timeout`
+milliseconds. When the cursor has moved before the answer arrives, no popup
+is shown. Press the key again while the popup is open to enter it.
+
+                                                    *octave-dbg-help-popup*
+|:OctaveDbg-help| works the same way, with the output of `help NAME`. Only
+plain (dotted) names are accepted. The popup is at most `help_max_height`
+lines high; press the key again to enter it and scroll.
+
+                                                *octave-dbg-run-to-cursor*
+Run to cursor ~
+Octave has no "run to cursor" command, so |:OctaveDbg-runto| sends one line
+with a temporary `dbstop` at the cursor, a `dbstatus` request (see
+|octave-dbg-bp-sync|) and `run(...)`, or `dbcont` when the debugger is
+stopped. When Octave stops, there or at another breakpoint, or the run
+ends, the temporary breakpoint is removed. It gets no sign and is never
+stored. On a comment line, Octave stops at the next code line. When the
+cursor line already has a breakpoint, it simply runs or continues.
+
+==============================================================================
+9. BREAKPOINTS                                      *octave-dbg-breakpoints*
+
+The plugin keeps the list of breakpoints itself and draws them as signs
+(`sign_text`, `sign_hl`). The signs move with the text when you edit.
+
+To set a breakpoint, the plugin sends
+>
+    addpath('<absolute folder>'); [~] = dbstop('<name>', '<line>');
+<
+because Octave's `dbstop` takes a function or script name, not a path (see
+|octave-dbg-notes|). The file name must be a valid Octave identifier: no
+`-`, no leading digit, and the extension `.m`.
+
+The breakpoints are sent to Octave again:
+- after each save of a file that has breakpoints, about one second later,
+  with the line numbers taken from the signs.
+- after each start or restart of the REPL.
+
+                                                       *octave-dbg-bp-sync*
+Each `dbstop` and `dbclear` also asks Octave for `dbstatus` (through the
+helper `octave/octave_dbg_bps.m`, which writes the answer to a temporary
+file, so the REPL shows no extra output). The stored lines and the signs are
+then set to what Octave reports:
+- A breakpoint on a comment or an empty line moves to the next line that
+  runs code. Two such breakpoints can end up on one line.
+- A breakpoint that Octave does not accept is removed. This happens for a
+  comment after the last code line of a script (Octave puts it on a line
+  after the end of the file; the plugin clears it there).
+A message names the lines that changed, for example
+>
+    octave-dbg: demo_script.m: Octave has breakpoints at line 2, not at line 1
+<
+Breakpoints that you set by typing `dbstop` in the REPL are not shown.
+
+==============================================================================
+10. EVENTS AND HIGHLIGHTS                                *octave-dbg-events*
+
+                                                      *OctaveDbgReplStarted*
+User OctaveDbgReplStarted
+    After a new Octave job has started. The plugin uses it to send the
+    breakpoints again and to restart the panel helper.
+
+                                                       *OctaveDbgReplExited*
+User OctaveDbgReplExited
+    After the Octave job has exited, on purpose or not.
+
+                                                         *OctaveDbgStopped*
+User OctaveDbgStopped
+    After the debugger stopped and the marker moved. `data` is
+    `{ name = ..., line = ..., path = ... }`.
+
+                                                           *OctaveDbgEnded*
+User OctaveDbgEnded
+    After a debug session ended (the normal prompt came back).
+
+Example: >lua
+
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "OctaveDbgReplStarted",
+      callback = function()
+        require("octave_dbg").send("format long")
+      end,
+    })
+<
+                                                      *OctaveDbgCurrentLine*
+OctaveDbgCurrentLine
+    Line highlight of the current-line marker. By default a link to
+    |hl-Visual|. Set it after your colorscheme to change it: >lua
+
+    vim.api.nvim_set_hl(0, "OctaveDbgCurrentLine", { bg = "#3b3052" })
+<
+==============================================================================
+11. HEALTH CHECK                                          *octave-dbg-health*
+
+`:checkhealth octave_dbg` checks the Neovim version, that the Octave
+executable from `cmd` is on $PATH, the Octave version, and whether the REPL
+job is alive.
+
+With a lazy-loaded plugin spec, the check is found only after the plugin has
+loaded. Before that, it reports "No healthcheck found". Open a `.m` file or
+run `:OctaveDbg status` first.
+
+==============================================================================
+12. OCTAVE NOTES AND LIMITS                                *octave-dbg-notes*
+
+Tested with GNU Octave 11.1.0 on macOS.
+
+- `dbstop('/abs/path/f.m', 3)` fails with "unable to find function".
+  `dbstop('f', '3')` works when the folder of `f.m` is on the load path.
+  Hence the `addpath` before each `dbstop`.
+- Called without an output, `dbstop` sets `ans` to the line number. The
+  plugin uses `[~] = dbstop(...)` to keep your `ans`.
+- A breakpoint in a plain script fires when the script is started with
+  `run('/abs/path/script.m')`, which is what |:OctaveDbg-run| sends.
+- Octave forgets the breakpoints of a file when the file changes on disk.
+  When `dbstop` arrives within the same second as the write, Octave reloads
+  the file again and loses the breakpoint. This is why the plugin waits
+  about one second after a save.
+- On a comment or an empty line, `dbstop` puts the breakpoint on the next
+  line that runs code; on a comment after the last code line of a script,
+  on a line after the end of the file; after the end of the file, nowhere,
+  without an error. See |octave-dbg-bp-sync|.
+- Between an edit and the next save, the signs move but Octave's
+  breakpoints stay on the old lines.
+- When Octave is killed, it may write an `octave-workspace` file in its
+  working folder.
+- While you type at the prompt, the panel may lag by a fraction of a second.
+- The hover and the panel only update while Octave waits at a prompt.
+- `F5` decides between run and continue from the current-line marker, so
+  it needs `marker = true` (the default) to continue.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
