@@ -193,16 +193,39 @@ function M.ensure()
 end
 
 --- Stop the job on purpose (no automatic restart).
+---
+--- Octave is asked to exit first. Stopped by a signal (as jobstop does),
+--- Octave writes its variables to an "octave-workspace" crash dump in its
+--- working folder. So: Ctrl+U (clear a half-typed line) and "exit"; if
+--- Octave is still there after a second, Ctrl+C (stop a running command)
+--- and "exit" again; a signal only as the last resort. This waits for up to
+--- about 2.5 seconds.
 function M.stop()
-  if M.alive() then
-    state.stopping = true
-    vim.fn.jobstop(state.chan)
+  if not M.alive() then
+    return
   end
+  state.stopping = true
+  local chan = state.chan
+  local function exited(ms)
+    return vim.fn.jobwait({ chan }, ms)[1] ~= -1
+  end
+  pcall(vim.fn.chansend, chan, "\21exit\n")
+  if exited(1000) then
+    return
+  end
+  pcall(vim.fn.chansend, chan, "\3")
+  exited(200) -- give Ctrl+C time to stop the command
+  pcall(vim.fn.chansend, chan, "\21exit\n")
+  if exited(1300) then
+    return
+  end
+  vim.fn.jobstop(chan)
 end
 
 -- When Neovim quits right after Octave was stopped, or with Octave still
 -- running, Octave can survive as an orphan process that keeps using CPU.
--- Stop it on exit and wait for it (Neovim sends SIGKILL after 2 seconds).
+-- Stop it on exit (asking it to exit first, see M.stop) and wait for it
+-- (Neovim sends SIGKILL after 2 seconds).
 vim.api.nvim_create_autocmd("VimLeavePre", {
   group = vim.api.nvim_create_augroup("octave_dbg_repl", { clear = true }),
   callback = function()

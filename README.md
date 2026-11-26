@@ -302,8 +302,12 @@ Notes on Octave's debugger that shape the plugin (Octave 11.1):
   reports. A breakpoint that Octave places after the end of the file is
   cleared again and reported as not accepted.
 - **REPL restarts.** The plugin keeps the breakpoint list and sends it again
-  when the REPL starts or restarts. When Neovim quits, Octave is stopped and
-  given up to 3 seconds to exit, so that no orphaned Octave process is left.
+  when the REPL starts or restarts. When Neovim quits, the plugin asks
+  Octave to exit (Ctrl+U and `exit`; if Octave is busy, Ctrl+C and `exit`
+  again) and waits for it, so that no orphaned Octave process is left.
+  Stopped by a signal instead, Octave writes its variables to an
+  `octave-workspace` crash dump in its working folder; a signal is used only
+  when Octave does not exit within about 2.5 seconds.
 - **Reading the workspace without echo.** `octave/octave_dbg_hook.m`
   registers an `add_input_event_hook`, which Octave calls while it waits for
   input. Inside it, `evalin('caller', ...)` sees the workspace of the
@@ -340,8 +344,9 @@ Notes on Octave's debugger that shape the plugin (Octave 11.1):
   breakpoints stay on the old lines.
 - The panel, the hover and the help popup only update while Octave waits at
   a prompt; while a command runs, the popup says that Octave is busy.
-- When Octave is killed, it may write an `octave-workspace` file in its
-  working folder.
+- If Octave is killed by a signal, for example when Neovim itself crashes or
+  Octave does not answer `exit`, Octave writes an `octave-workspace` crash
+  dump into its working folder.
 - The viewer shows values but cannot edit them. It shows one struct, not
   struct arrays, and the first page of N-D arrays. Numbers are shown with 5
   significant digits (integers exactly), not in Octave's current `format`.

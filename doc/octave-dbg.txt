@@ -683,8 +683,11 @@ Tested with GNU Octave 11.1.0 on macOS.
   without an error. See |octave-dbg-bp-sync|.
 - Between an edit and the next save, the signs move but Octave's
   breakpoints stay on the old lines.
-- When Octave is killed, it may write an `octave-workspace` file in its
-  working folder.
+- When Neovim quits, the plugin asks Octave to exit: Ctrl+U and `exit`, and
+  if Octave is busy, Ctrl+C and `exit` again. Only if Octave has not exited
+  after about 2.5 seconds is it stopped by a signal. Killed by a signal (also
+  when Neovim itself crashes), Octave writes an `octave-workspace` crash
+  dump into its working folder.
 - While you type at the prompt, the panel may lag by a fraction of a second.
 - The hover, the panel and the viewer only update while Octave waits at a
   prompt.
