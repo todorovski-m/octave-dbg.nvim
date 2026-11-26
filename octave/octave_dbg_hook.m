@@ -173,10 +173,22 @@ function txt = hover_text (id, name, parts, isvar, val, scope, max_elements)
     dims = strjoin (arrayfun (@num2str, size (val), 'UniformOutput', false), 'x');
     [body, note] = hover_body (val, max_elements);
     txt = sprintf ("%sstatus\tok\nclass\t%s\nsize\t%s\nnote\t%s\n#body\n%s\n#end\n", ...
-                   head, class (val), dims, note, body);
+                   head, class_text (val), dims, note, body);
   catch e
     msg = strrep (e.message, "\n", ' ');
     txt = sprintf ("%sstatus\terror\nmessage\t%s\n#end\n", head, msg);
+  end
+end
+
+function s = class_text (val)
+  % The class, with "sparse" and "complex" added for numeric values.
+  % (isreal is false for cells and structs, so only numeric values count.)
+  s = class (val);
+  if (issparse (val))
+    s = [s ' sparse'];
+  end
+  if (isnumeric (val) && ! isreal (val))
+    s = [s ' complex'];
   end
 end
 
@@ -198,9 +210,24 @@ end
 
 function [body, note] = hover_body (val, max_elements)
   % disp output, or a summary for large values (disp of a 1000x1000 matrix
-  % takes about 0.4 s and produces 13 MB of text).
+  % takes about 0.4 s and produces 13 MB of text). Sparse values are judged
+  % by their number of nonzeros, not by rows times columns, and their
+  % statistics come from the nonzeros only: mean() over a 1e8-element
+  % sparse column takes minutes and would freeze Octave.
   note = '';
   n = numel (val);
+  if (issparse (val))
+    nz = nnz (val);
+    if (nz <= max_elements)
+      body = disp_text (val);
+      return;
+    end
+    show = 20;
+    note = sprintf ('%d nonzeros; showing statistics and the first %d', nz, show);
+    body = strjoin ({octave_dbg_view('header', val), octave_dbg_view('stats', val), ...
+                     octave_dbg_view('entries', val, 1, show)}, "\n");
+    return;
+  end
   if (n <= max_elements || isobject (val) || (isstruct (val) && n == 1))
     body = disp_text (val);
     return;
@@ -211,9 +238,9 @@ function [body, note] = hover_body (val, max_elements)
     return;
   end
   lines = {};
-  if ((isnumeric (val) || islogical (val)) && isreal (val))
-    d = double (val(:));
-    lines{end+1} = sprintf ('min %g   max %g   mean %g', min (d), max (d), mean (d));
+  stats = octave_dbg_view ('stats', val);
+  if (! isempty (stats))
+    lines{end+1} = stats;
   end
   idx = {1:min(5, rows(val)), 1:min(5, columns(val))};
   idx(end+1:ndims (val)) = {1};
