@@ -6,6 +6,7 @@ local dbg = require("octave_dbg.debug")
 local marker = require("octave_dbg.marker")
 local panel = require("octave_dbg.panel")
 local hover = require("octave_dbg.hover")
+local viewer = require("octave_dbg.viewer")
 
 local M = {}
 
@@ -61,6 +62,10 @@ M.close_panel = panel.close
 M.hover = hover.hover
 --- Show `help NAME` in a popup, for `name` or the name under the cursor.
 M.help = hover.help
+--- Open the value viewer for `name`, or for the name under the cursor.
+M.view = function(name)
+  viewer.open(name)
+end
 --- Where the debugger stopped: { name, line, path } or nil.
 M.location = marker.current
 
@@ -69,6 +74,7 @@ function M._setup_modules()
   dbg.setup()
   marker.setup()
   panel.setup()
+  viewer.setup()
 end
 
 --- Lines shown by :OctaveDbg status.
@@ -159,6 +165,12 @@ M.subcommands = {
   whos = { desc = "Show the workspace", fn = M.whos },
   panel = { desc = "Toggle the auto-refreshing variables panel", fn = M.panel },
   hover = { desc = "Show the variable under the cursor", fn = M.hover },
+  view = {
+    desc = "Open the value viewer for a name (default: the name under the cursor)",
+    fn = function(cmd)
+      M.view(cmd.args[1])
+    end,
+  },
   help = {
     desc = "Show Octave help for a name (default: the name under the cursor)",
     fn = function(cmd)
@@ -288,6 +300,9 @@ local function set_keymaps(bufnr)
   map("n", "f", M.run, "run file")
   map("n", "w", M.whos, "whos")
   map("n", "v", M.panel, "toggle variables panel")
+  map("n", "V", function()
+    M.view()
+  end, "open value viewer")
   map("n", "h", M.hover, "show variable under cursor")
   map("n", "d", function()
     M.help()

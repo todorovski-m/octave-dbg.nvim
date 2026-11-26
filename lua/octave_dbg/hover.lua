@@ -153,8 +153,25 @@ function M.hover()
   end
   local buf = vim.api.nvim_get_current_buf()
   local max_lines = config.get("hover_max_lines", buf)
+  local function large(answer)
+    return answer.status == "ok" and answer.note ~= nil and answer.note ~= ""
+  end
   popup_request("hover", name, { name, tostring(config.get("hover_max_elements", buf)) }, function(answer)
-    return M.format(answer, max_lines)
+    local lines = M.format(answer, max_lines)
+    if large(answer) then
+      table.insert(lines, "(Enter in this popup: open the viewer)")
+    end
+    return lines
+  end, nil, function(answer, pbuf, pwin)
+    -- A large value: <CR> in the popup opens the full-value viewer.
+    if large(answer) and pbuf and vim.api.nvim_buf_is_valid(pbuf) then
+      vim.keymap.set("n", "<CR>", function()
+        if pwin and vim.api.nvim_win_is_valid(pwin) then
+          vim.api.nvim_win_close(pwin, true)
+        end
+        require("octave_dbg.viewer").open(answer.name)
+      end, { buffer = pbuf, desc = "octave-dbg: open the value viewer" })
+    end
   end)
 end
 
