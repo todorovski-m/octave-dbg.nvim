@@ -14,6 +14,11 @@ function octave_dbg_hook (action, dir)
   %              hover.ans and deletes the request
   %   help.req   "ID<TAB>NAME"; the hook answers with the output of
   %              help NAME in help.ans and deletes the request
+  %   view.req   "ID<TAB>NAME<TAB>MODE<TAB>ROW<TAB>COL<TAB>NROWS<TAB>NCOLS<TAB>CPLX";
+  %              the hook answers with one window of the value in view.ans
+  %              (see octave_dbg_view.m) and deletes the request
+  %
+  % Names are checked to be plain dotted names before they reach evalin.
   %
   % Every file the hook writes ends with "#end", so that Neovim never uses a
   % half-written file.
@@ -70,7 +75,7 @@ function tick (dir)
     if (exist (req_file, 'file'))
       req = strsplit (strtrim (fileread (req_file)), "\t");
       delete (req_file);
-      if (numel (req) >= 3)
+      if (numel (req) >= 3 && valid_name (req{2}))
         name = req{2};
         parts = strsplit (name, '.');
         isvar = evalin ('caller', sprintf ('exist (''%s'', ''var'')', parts{1}));
@@ -81,6 +86,25 @@ function tick (dir)
         end
         txt = hover_text (req{1}, name, parts, isvar == 1, val, scope, str2double (req{3}));
         write_file ([dir '/hover.ans'], txt);
+      end
+    end
+
+    % Viewer request.
+    view_file = [dir '/view.req'];
+    if (exist (view_file, 'file'))
+      req = strsplit (strtrim (fileread (view_file)), "\t");
+      delete (view_file);
+      if (numel (req) >= 8)
+        isvar = false;
+        val = [];
+        if (valid_name (req{2}))
+          parts = strsplit (req{2}, '.');
+          isvar = evalin ('caller', sprintf ('exist (''%s'', ''var'')', parts{1})) == 1;
+          if (isvar)
+            val = evalin ('caller', parts{1});
+          end
+        end
+        write_file ([dir '/view.ans'], octave_dbg_view ('answer', val, req, scope, isvar));
       end
     end
 
@@ -96,6 +120,12 @@ function tick (dir)
   catch
     % Never let an error escape into the prompt.
   end
+end
+
+function tf = valid_name (name)
+  % Plain names and dotted struct field paths only, so that nothing else can
+  % reach evalin.
+  tf = ! isempty (regexp (name, '^[A-Za-z]\w*(\.[A-Za-z]\w*)*$', 'once'));
 end
 
 function write_file (file, txt)
