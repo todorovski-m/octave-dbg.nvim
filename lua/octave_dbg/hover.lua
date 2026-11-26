@@ -153,13 +153,16 @@ function M.hover()
   end
   local buf = vim.api.nvim_get_current_buf()
   local max_lines = config.get("hover_max_lines", buf)
+  -- A large value (shown as a summary) or a struct: <CR> opens the viewer,
+  -- where the fields of a struct can be opened one by one.
   local function large(answer)
-    return answer.status == "ok" and answer.note ~= nil and answer.note ~= ""
+    return answer.status == "ok" and ((answer.note ~= nil and answer.note ~= "") or answer.class == "struct")
   end
   popup_request("hover", name, { name, tostring(config.get("hover_max_elements", buf)) }, function(answer)
     local lines = M.format(answer, max_lines)
     if large(answer) then
-      table.insert(lines, "(Enter in this popup: open the viewer)")
+      -- Right under the header, so that it stays visible in a long popup.
+      table.insert(lines, 2, "(Enter in this popup: open the viewer)")
     end
     return lines
   end, nil, function(answer, pbuf, pwin)

@@ -198,6 +198,31 @@ function M.toggle_mode(v, first_entry)
   return n
 end
 
+--- The field name on row `r` of a struct answer (mode "fields"), or nil.
+---@param a table parsed answer
+---@param r integer 1-based row among the shown fields
+function M.field_at(a, r)
+  if not a or a.status ~= "ok" or a.mode ~= "fields" then
+    return nil
+  end
+  local k = 0
+  for _, line in ipairs(a.body) do
+    if line ~= "" then
+      k = k + 1
+      if k == r then
+        local name = line:match("^([^\t]+)")
+        return name and name:match("^[%a][%w_]*$") and name or nil
+      end
+    end
+  end
+  return nil
+end
+
+--- The name of a field of `parent`: "mpc" and "bus" give "mpc.bus".
+function M.child_name(parent, field)
+  return parent .. "." .. field
+end
+
 local function pad_left(s, w)
   return string.rep(" ", w - vim.fn.strdisplaywidth(s)) .. s
 end
@@ -263,6 +288,12 @@ local function hint_line(v)
   end
   if v.complex then
     table.insert(keys, "a " .. (v.polar and "re/im" or "mag/angle"))
+  end
+  if v.mode == "fields" then
+    table.insert(keys, "<CR> open field")
+  end
+  if (v.depth or 0) > 0 then
+    table.insert(keys, "<BS> back")
   end
   vim.list_extend(keys, { "r refresh", "q close" })
   return table.concat(keys, "  ")
@@ -435,6 +466,8 @@ end
 
 -- Defined below; redraw asks for a new window when the columns do not fit.
 local request
+-- Defined below; sets the float title when a field is opened.
+local set_title
 
 -- Draw the last answer with the cursor, and put the cursor on its cell.
 local function redraw()
@@ -649,6 +682,45 @@ local function set_keys(buf)
     request()
   end, "refresh")
   map("q", close, "close")
+  map("<CR>", function()
+    local field = M.field_at(state.answer, state.cursor.r)
+    if not field then
+      if state.view.mode == "fields" then
+        return
+      end
+      vim.notify("octave-dbg: <CR> opens a field of a struct; cell elements cannot be opened", vim.log.levels.INFO)
+      return
+    end
+    -- Remember where we were, then open the field in the same window.
+    table.insert(state.stack, { view = vim.deepcopy(state.view), cursor = vim.deepcopy(state.cursor) })
+    local name = M.child_name(state.view.name, field)
+    state.view = { name = name, mode = "list", row = 1, col = 1, polar = state.view.polar, depth = #state.stack }
+    state.cursor = { r = 1, c = 1 }
+    state.fit_cols = nil
+    set_title(name)
+    request()
+  end, "open the field under the cursor")
+  local function back()
+    local prev = table.remove(state.stack)
+    if not prev then
+      return
+    end
+    state.view = prev.view
+    state.cursor = prev.cursor
+    state.fit_cols = nil
+    set_title(state.view.name)
+    request()
+  end
+  map("<BS>", back, "back to the parent struct")
+  map("-", back, "back to the parent struct")
+end
+
+-- The float title shows the path, such as "octave-dbg: mpc.bus".
+function set_title(name)
+  local win = state and state.win
+  if win and vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_config(win).relative ~= "" then
+    pcall(vim.api.nvim_win_set_config, win, { title = " octave-dbg: " .. name .. " ", title_pos = "center" })
+  end
 end
 
 local function open_window(buf, title)
@@ -705,6 +777,7 @@ function M.open(name)
     -- Octave answers other values with a grid.
     view = { name = name, mode = "list", row = 1, col = 1, polar = false },
     cursor = { r = 1, c = 1 }, -- relative to the window
+    stack = {}, -- parents opened with <CR>: { view, cursor }
   }
   draw({ name .. ": waiting for Octave..." })
   vim.bo[buf].modifiable = false

@@ -258,7 +258,18 @@ function [body, note] = hover_body (val, max_elements)
                      octave_dbg_view('entries', val, 1, show)}, "\n");
     return;
   end
-  if (n <= max_elements || isobject (val) || (isstruct (val) && n == 1))
+  if (isstruct (val) && n == 1)
+    % disp of a struct prints every field in full, so a struct with a large
+    % field gets the list of its fields instead.
+    if (octave_dbg_view ('is_large', val, max_elements))
+      note = 'large fields; showing the list of fields';
+      body = octave_dbg_view ('fields', val);
+    else
+      body = disp_text (val);
+    end
+    return;
+  end
+  if (n <= max_elements || isobject (val))
     body = disp_text (val);
     return;
   end

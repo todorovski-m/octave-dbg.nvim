@@ -167,9 +167,10 @@ cursor in a floating window: name, size, class, scope and Octave's own
 it shows `s.a.b`; on `a`, it shows `s.a`. Large values get a summary (min,
 max, mean and the top-left 5x5; for a sparse value, Octave's header and the
 first nonzero entries). Only names are looked up: if the name is not a
-variable, the popup says so, and nothing is run. Press the key again to
-enter the popup. For a large value, `<CR>` in the popup opens the value
-viewer.
+variable, the popup says so, and nothing is run. A struct with a large
+field shows the list of its fields instead of every value. Press the key
+again to enter the popup. For a large value or a struct, `<CR>` in the
+popup opens the value viewer.
 
 **Value viewer.** `:OctaveDbg view [name]` (or `<leader>oV`) opens a
 read-only buffer, by default in a float, that shows one window of a value:
@@ -190,6 +191,8 @@ the cell under the cursor, and for sparse values Octave's own line
 | `g` | go to a row and column (`120 5`, `120`, or `,5`), with the cursor on that cell |
 | `m` | sparse: switch between the nonzero list and the grid |
 | `a` | complex: switch between real and imaginary parts and magnitude and angle |
+| `<CR>` | open the struct field under the cursor |
+| `<BS>` or `-` | back to the parent struct |
 | `r` | refresh |
 | `q` | close |
 
@@ -200,9 +203,13 @@ the cell under the cursor, and for sparse values Octave's own line
   them.
 - **Complex values** show real and imaginary parts, or magnitude and angle
   in degrees after `a`.
-- **Cells** show a window of one-line summaries, **structs** their fields
-  (one level), and **char** arrays a window of lines. N-D arrays show their
-  first page. Other classes get a message.
+- **Structs** show their fields with size, class and a short value. `<CR>`
+  opens the field under the cursor in the same window (`mpc` -> `mpc.bus`),
+  as deep as the fields go; `<BS>` goes back, with the cursor on the field
+  you came from. The float title shows the path.
+- **Cells** show a window of one-line summaries, and **char** arrays a
+  window of lines. N-D arrays show their first page. Other classes get a
+  message.
 - The viewer is **not refreshed** when the debugger stops again; it is
   marked, and `r` refreshes it.
 
@@ -348,7 +355,8 @@ Notes on Octave's debugger that shape the plugin (Octave 11.1):
   Octave does not answer `exit`, Octave writes an `octave-workspace` crash
   dump into its working folder.
 - The viewer shows values but cannot edit them. It shows one struct, not
-  struct arrays, and the first page of N-D arrays. Numbers are shown with 5
+  struct arrays, and the first page of N-D arrays. Cell elements cannot be
+  opened, because the viewer only looks up names, not indices. Numbers are shown with 5
   significant digits (integers exactly), not in Octave's current `format`.
 
 ## Development

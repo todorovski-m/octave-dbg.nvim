@@ -493,8 +493,10 @@ cut to `hover_max_lines` lines. A value with more than `hover_max_elements`
 elements gets a summary: min, max and mean (of `abs` for complex values) and
 the top-left 5x5 part. A sparse value counts by its number of nonzeros; a
 large one shows Octave's header line, the statistics and the first 20
-nonzero entries. For a summary, `<CR>` in the popup (enter it by pressing
-the key again) opens the value viewer, see |octave-dbg-viewer|.
+nonzero entries. A struct with a large field (looked for up to 3 levels
+deep) shows the list of its fields instead of every value. For a summary
+or a struct, `<CR>` in the popup (enter it by pressing the key again)
+opens the value viewer, see |octave-dbg-viewer|.
 
 Only names are looked up, never expressions. If the first part of the name
 is not a variable in the frame of the prompt, the popup says "not a
@@ -555,6 +557,8 @@ then the statistics and the range that is shown.
     g              go to a row and column: "120 5", "120" or ",5"
     m              sparse: switch between the nonzero list and the grid
     a              complex: switch re/im and magnitude/angle
+    <CR>           open the struct field under the cursor
+    <BS>  -        back to the parent struct
     r              refresh
     q              close
 
@@ -570,9 +574,13 @@ Values ~
   `g` goes to the first nonzero at or after a row and column.
 - Complex values: real and imaginary parts, or magnitude and angle in
   degrees after `a`. Statistics use `abs`.
-- Cells: a window of one-line summaries. A struct: its fields (one level),
-  with size, class and a short value. char arrays: a window of lines.
-  Other classes, and struct arrays, get a message.
+- A struct: its fields, with size, class and a short value. <CR> opens
+  the field under the cursor in the same window ("mpc" -> "mpc.bus"), as
+  deep as the fields go; <BS> or `-` goes back, with the cursor on the
+  field you came from. The float title shows the path.
+- Cells: a window of one-line summaries; cell elements cannot be opened.
+  char arrays: a window of lines. Other classes, and struct arrays, get a
+  message.
 
 Numbers are shown with 5 significant digits, and integers exactly. The
 viewer is not refreshed when the debugger stops again; it is marked, and

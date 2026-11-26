@@ -13,6 +13,13 @@ function out = octave_dbg_view (action, val, varargin)
   %       Entries FIRST .. FIRST+COUNT-1 of the nonzero list of a sparse
   %       VAL, in column-major order, formatted by Octave as
   %       "(i, j) -> value".
+  %   octave_dbg_view ('is_large', VAL, MAX_ELEMENTS)
+  %       True when disp of VAL would print more than MAX_ELEMENTS values:
+  %       a large array (sparse: by nonzeros), or a struct or cell that holds
+  %       one, looked for up to 3 levels deep (deeper counts as large).
+  %   octave_dbg_view ('fields', VAL)
+  %       The fields of a scalar struct, one per line: name, size and class,
+  %       and a short value, in aligned columns.
   %   octave_dbg_view ('answer', VAL, REQ, SCOPE, ISVAR)
   %       The text of view.ans for the large-value viewer. REQ is the cell of
   %       request fields {ID, NAME, MODE, ROW, COL, NROWS, NCOLS, CPLX}:
@@ -37,6 +44,10 @@ function out = octave_dbg_view (action, val, varargin)
       out = sparse_entries (val, varargin{1}, varargin{2});
     case 'answer'
       out = view_answer (val, varargin{:});
+    case 'is_large'
+      out = is_large (val, varargin{1}, 0);
+    case 'fields'
+      out = fields_text (val);
     otherwise
       error ('octave_dbg_view: unknown action %s', action);
   end
@@ -390,4 +401,55 @@ function s = fmt_real (x)
   else
     s = sprintf ('%.5g', x);
   end
+end
+
+% Structs in the hover --------------------------------------------------------
+
+function tf = is_large (v, max_elements, depth)
+  if (issparse (v))
+    tf = nnz (v) > max_elements;
+  elseif (isstruct (v) || iscell (v))
+    if (depth >= 3 || numel (v) > max_elements)
+      tf = true;
+      return;
+    end
+    tf = false;
+    if (isstruct (v))
+      names = fieldnames (v);
+      for k = 1:numel (v)
+        for f = 1:numel (names)
+          if (is_large (v(k).(names{f}), max_elements, depth + 1))
+            tf = true;
+            return;
+          end
+        end
+      end
+    else
+      for k = 1:numel (v)
+        if (is_large (v{k}, max_elements, depth + 1))
+          tf = true;
+          return;
+        end
+      end
+    end
+  else
+    tf = numel (v) > max_elements;
+  end
+end
+
+function txt = fields_text (val)
+  names = fieldnames (val);
+  descr = cell (size (names));
+  for k = 1:numel (names)
+    v = val.(names{k});
+    dims = strjoin (arrayfun (@num2str, size (v), 'UniformOutput', false), 'x');
+    descr{k} = sprintf ('%s %s', dims, class_text (v));
+  end
+  w1 = max ([0; cellfun(@numel, names)]);
+  w2 = max ([0; cellfun(@numel, descr)]);
+  lines = cell (size (names));
+  for k = 1:numel (names)
+    lines{k} = sprintf ('%-*s  %-*s  %s', w1, names{k}, w2, descr{k}, short_value (val.(names{k})));
+  end
+  txt = strjoin (lines', "\n");
 end
