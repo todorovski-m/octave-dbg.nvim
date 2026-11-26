@@ -14,7 +14,8 @@ function octave_dbg_hook (action, dir)
   %              hover.ans and deletes the request
   %   help.req   "ID<TAB>NAME"; the hook answers with the output of
   %              help NAME in help.ans and deletes the request
-  %   view.req   "ID<TAB>NAME<TAB>MODE<TAB>ROW<TAB>COL<TAB>NROWS<TAB>NCOLS<TAB>CPLX";
+  %   view.req   "ID<TAB>PATH<TAB>MODE<TAB>ROW<TAB>COL<TAB>NROWS<TAB>NCOLS<TAB>CPLX"
+  %              (PATH: a name with ".field", "{i}" or "{i,j}" parts);
   %              the hook answers with one window of the value in view.ans
   %              (see octave_dbg_view.m) and deletes the request
   %
@@ -97,11 +98,13 @@ function tick (dir)
       if (numel (req) >= 8)
         isvar = false;
         val = [];
-        if (valid_name (req{2}))
-          parts = strsplit (req{2}, '.');
-          isvar = evalin ('caller', sprintf ('exist (''%s'', ''var'')', parts{1})) == 1;
+        % A path such as mpc.bus or c{2,3}{1}: only its leading name goes
+        % to evalin; octave_dbg_view checks and walks the rest.
+        base = regexp (req{2}, '^[A-Za-z]\w*', 'match', 'once');
+        if (! isempty (base))
+          isvar = evalin ('caller', sprintf ('exist (''%s'', ''var'')', base)) == 1;
           if (isvar)
-            val = evalin ('caller', parts{1});
+            val = evalin ('caller', base);
           end
         end
         write_file ([dir '/view.ans'], octave_dbg_view ('answer', val, req, scope, isvar));

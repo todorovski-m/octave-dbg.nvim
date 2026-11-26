@@ -149,15 +149,14 @@ function txt = view_answer (val, req, scope, isvar)
   name = req{2};
   head = sprintf ("#\t%s\nname\t%s\nscope\t%s\n", id, name, scope);
   try
-    if (isempty (regexp (name, '^[A-Za-z]\w*(\.[A-Za-z]\w*)*$', 'once')))
-      error ('not a variable name: %s', name);
+    if (! is_path (name))
+      error ('not a variable name or path: %s', name);
     end
     if (! isvar)
       txt = [head "status\tnotvar\n#end\n"];
       return;
     end
-    parts = strsplit (name, '.');
-    val = descend (val, parts);
+    val = descend (val, name);
     mode = req{3};
     row = max (1, round (str2double (req{4})));
     col = max (1, round (str2double (req{5})));
@@ -180,20 +179,51 @@ function txt = view_answer (val, req, scope, isvar)
   end
 end
 
-function val = descend (val, parts)
-  for k = 2:numel (parts)
-    where = strjoin (parts(1:k-1), '.');
-    if (! isstruct (val) && ! isobject (val))
-      error ('%s is a %s, not a struct', where, class (val));
+function tf = is_path (name)
+  % A variable name, then any number of ".field", "{i}" or "{i,j}" parts,
+  % with plain positive integers only: nothing in it can run code.
+  tf = ! isempty (regexp (name, '^[A-Za-z]\w*(\.[A-Za-z]\w*|\{[1-9]\d*(,[1-9]\d*)?\})*$', 'once'));
+end
+
+function val = descend (val, name)
+  % VAL is the value of the leading name; walk the rest of the path. Indices
+  % are taken as numbers, never evaluated.
+  base = regexp (name, '^[A-Za-z]\w*', 'match', 'once');
+  toks = regexp (name(numel (base)+1:end), '\.[A-Za-z]\w*|\{\d+(,\d+)?\}', 'match');
+  where = base;
+  for k = 1:numel (toks)
+    t = toks{k};
+    dims = strjoin (arrayfun (@num2str, size (val), 'UniformOutput', false), 'x');
+    if (t(1) == '.')
+      f = t(2:end);
+      if (! isstruct (val) && ! isobject (val))
+        error ('%s is a %s, not a struct', where, class (val));
+      end
+      if (numel (val) != 1)
+        error ('%s is a %s array; index it first', where, dims);
+      end
+      if (! isfield (val, f) && ! (isobject (val) && isprop (val, f)))
+        error ('%s has no field %s', where, f);
+      end
+      val = val.(f);
+    else
+      idx = str2double (strsplit (t(2:end-1), ','));
+      if (! iscell (val))
+        error ('%s is a %s, not a cell', where, class (val));
+      end
+      if (numel (idx) == 1)
+        if (idx > numel (val))
+          error ('%s is a %s cell; %s is outside', where, dims, t);
+        end
+        val = val{idx};
+      else
+        if (ndims (val) > 2 || idx(1) > rows (val) || idx(2) > columns (val))
+          error ('%s is a %s cell; %s is outside', where, dims, t);
+        end
+        val = val{idx(1), idx(2)};
+      end
     end
-    if (numel (val) != 1)
-      error ('%s is a %s array; index it first', where, ...
-             strjoin (arrayfun (@num2str, size (val), 'UniformOutput', false), 'x'));
-    end
-    if (! isfield (val, parts{k}) && ! (isobject (val) && isprop (val, parts{k})))
-      error ('%s has no field %s', where, parts{k});
-    end
-    val = val.(parts{k});
+    where = [where t];
   end
 end
 

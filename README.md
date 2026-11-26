@@ -86,7 +86,7 @@ the status.
 | `whos` / `clc` / `close` | `whos` / `clc` / `close all` |
 | `panel` | Toggle the variables panel |
 | `hover` | Show the variable or struct field under the cursor in a popup |
-| `view [name]` | Open the value viewer (default: the name under the cursor) |
+| `view [name]` | Open the value viewer for a name or path such as `mpc.bus` or `c{2,3}` (default: the name under the cursor) |
 | `help [name]` | Octave `help` for a name (default: under the cursor) in a popup |
 | `status` | REPL state, stop location, panel and breakpoints |
 | `debug` | Scratch buffer with the exact commands sent and recent output |
@@ -191,7 +191,7 @@ the cell under the cursor, and for sparse values Octave's own line
 | `g` | go to a row and column (`120 5`, `120`, or `,5`), with the cursor on that cell |
 | `m` | sparse: switch between the nonzero list and the grid |
 | `a` | complex: switch between real and imaginary parts and magnitude and angle |
-| `<CR>` | open the struct field under the cursor |
+| `<CR>` | open the struct field or cell element under the cursor |
 | `<BS>` or `-` | back to the parent struct |
 | `r` | refresh |
 | `q` | close |
@@ -209,9 +209,13 @@ the cell under the cursor, and for sparse values Octave's own line
   opens the field under the cursor in the same window (`mpc` -> `mpc.bus`),
   as deep as the fields go; `<BS>` goes back, with the cursor on the field
   you came from. The float title shows the path.
-- **Cells** show a window of one-line summaries, and **char** arrays a
-  window of lines. N-D arrays show their first page. Other classes get a
-  message.
+- **Cells** show a window of one-line summaries. `<CR>` opens the element
+  under the cursor (`c` -> `c{2,3}`), and from there fields and elements go
+  on (`c{2,1}{1,2}.x`). Paths accept only plain positive integers as
+  indices (no `end`, no variables, no expressions); both Neovim and Octave
+  check them, and Octave walks them without evaluating anything.
+- **char** arrays show a window of lines. N-D arrays show their first page.
+  Other classes get a message.
 - The viewer is **not refreshed** when the debugger stops again; it is
   marked, and `r` refreshes it.
 
@@ -357,9 +361,10 @@ Notes on Octave's debugger that shape the plugin (Octave 11.1):
   Octave does not answer `exit`, Octave writes an `octave-workspace` crash
   dump into its working folder.
 - The viewer shows values but cannot edit them. It shows one struct, not
-  struct arrays, and the first page of N-D arrays. Cell elements cannot be
-  opened, because the viewer only looks up names, not indices. Numbers are shown with 5
-  significant digits (integers exactly), not in Octave's current `format`.
+  struct arrays, and the first page of N-D arrays. Indices in a path are
+  plain integers only, so `c{end}` or `s(2).x` cannot be opened. Numbers
+  are shown with 5 significant digits (integers exactly), not in Octave's
+  current `format`.
 
 ## Development
 

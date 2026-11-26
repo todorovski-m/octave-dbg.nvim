@@ -246,6 +246,37 @@ function M.cell_at(layout, line, col)
   return r, #pos
 end
 
+--- True for a path that the viewer may open: a variable name, then any
+--- number of ".field", "{i}" or "{i,j}" parts with plain positive integers
+--- (no "end", no variables, no expressions). Octave checks it again.
+function M.valid_path(path)
+  if type(path) ~= "string" then
+    return false
+  end
+  local base, rest = path:match("^([%a][%w_]*)(.*)$")
+  if not base then
+    return false
+  end
+  while rest ~= "" do
+    local field, after = rest:match("^%.([%a][%w_]*)(.*)$")
+    if field then
+      rest = after
+    else
+      local inside, after2 = rest:match("^{([^}]*)}(.*)$")
+      if not inside or not (inside:match("^[1-9]%d*$") or inside:match("^[1-9]%d*,[1-9]%d*$")) then
+        return false
+      end
+      rest = after2
+    end
+  end
+  return true
+end
+
+--- The path of element (r, c) of the cell `parent`: "c", 2, 3 give "c{2,3}".
+function M.element_name(parent, r, c)
+  return ("%s{%d,%d}"):format(parent, r, c)
+end
+
 --- The name of a field of `parent`: "mpc" and "bus" give "mpc.bus".
 function M.child_name(parent, field)
   return parent .. "." .. field
@@ -319,6 +350,8 @@ local function hint_line(v)
   end
   if v.mode == "fields" then
     table.insert(keys, "<CR> open field")
+  elseif v.kind == "cell" then
+    table.insert(keys, "<CR> open element")
   end
   if (v.depth or 0) > 0 then
     table.insert(keys, "<BS> back")
@@ -720,17 +753,22 @@ local function set_keys(buf)
   end, "refresh")
   map("q", close, "close")
   map("<CR>", function()
+    local v = state.view
+    local name
     local field = M.field_at(state.answer, state.cursor.r)
-    if not field then
-      if state.view.mode == "fields" then
-        return
+    if field then
+      name = M.child_name(v.name, field)
+    elseif v.kind == "cell" and v.mode == "grid" and state.layout and state.layout.count > 0 then
+      -- The element under the cursor, by its row and column in the cell.
+      name = M.element_name(v.name, v.row + state.cursor.r - 1, v.col + state.cursor.c - 1)
+    else
+      if v.mode ~= "fields" then
+        vim.notify("octave-dbg: <CR> opens a struct field or a cell element", vim.log.levels.INFO)
       end
-      vim.notify("octave-dbg: <CR> opens a field of a struct; cell elements cannot be opened", vim.log.levels.INFO)
       return
     end
-    -- Remember where we were, then open the field in the same window.
+    -- Remember where we were, then open the field or element in the same window.
     table.insert(state.stack, { view = vim.deepcopy(state.view), cursor = vim.deepcopy(state.cursor) })
-    local name = M.child_name(state.view.name, field)
     state.view = { name = name, mode = "list", row = 1, col = 1, polar = state.view.polar, depth = #state.stack }
     state.cursor = { r = 1, c = 1 }
     state.fit_cols = nil
@@ -798,8 +836,8 @@ function M.open(name)
       return
     end
   end
-  if not ask.valid_name(name) then
-    vim.notify("octave-dbg: not a variable name: " .. name, vim.log.levels.WARN)
+  if not M.valid_path(name) then
+    vim.notify("octave-dbg: not a variable name or path (a name, .field, {i} or {i,j}): " .. name, vim.log.levels.WARN)
     return
   end
   close()

@@ -524,3 +524,32 @@ describe("viewer cell from the cursor", function()
     assert.same({ 2, 1 }, { viewer.cell_at(fields, 7, 15) })
   end)
 end)
+
+describe("viewer paths", function()
+  local viewer = require("octave_dbg.viewer")
+
+  it("accepts names, fields and plain integer cell indices", function()
+    for _, p in ipairs({ "c", "mpc.bus", "c{3}", "c{2,3}", "c{4}{2}.x", "data{1}.x", "a.b{10,2}.c" }) do
+      assert.is_true(viewer.valid_path(p), p)
+    end
+  end)
+
+  it("refuses anything that could be an expression", function()
+    for _, p in ipairs({ "", "1c", "c{0}", "c{03}", "c{end}", "c{k}", "c{1+1}", "c(2)", "c{1};system(1)",
+      "c{1,1,1}", "c{}", "c{ 1}", "c.", "c..x", "c{1}x" }) do
+      assert.is_false(viewer.valid_path(p), p)
+    end
+  end)
+
+  it("builds the path of a cell element", function()
+    assert.equals("c{2,3}", viewer.element_name("c", 2, 3))
+    assert.equals("s.data{1,4}", viewer.element_name("s.data", 1, 4))
+  end)
+
+  it("offers <CR> on the elements of a cell", function()
+    local ask = require("octave_dbg.ask")
+    local a = ask.parse("#\t1\nname\tc\nscope\tbase\nstatus\tok\nclass\tcell\nsize\t1x2\nnumel\t2\nkind\tcell\nmode\tgrid\nrow\t1\ncol\t1\nnrows\t1\nncols\t2\n#body\n1\t'two'\n#end\n")
+    local text = table.concat(viewer.render(a, { name = "c", mode = "grid", kind = "cell", rows = 1, cols = 2 }), "\n")
+    assert.truthy(text:find("<CR> open element", 1, true))
+  end)
+end)

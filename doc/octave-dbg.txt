@@ -121,7 +121,8 @@ a subcommand, it runs `status`.
 
 :OctaveDbg view [name]                                     *:OctaveDbg-view*
     Open the value viewer for [name], or for the variable or struct field
-    under the cursor. See |octave-dbg-viewer|.
+    under the cursor. [name] may be a path with fields and cell indices,
+    such as `mpc.bus` or `c{2,3}{1}.x`. See |octave-dbg-viewer|.
 
 :OctaveDbg status                                        *:OctaveDbg-status*
     Show the REPL state, the Octave command, the restart count, the number
@@ -557,7 +558,7 @@ then the statistics and the range that is shown.
     g              go to a row and column: "120 5", "120" or ",5"
     m              sparse: switch between the nonzero list and the grid
     a              complex: switch re/im and magnitude/angle
-    <CR>           open the struct field under the cursor
+    <CR>           open the struct field or cell element under the cursor
     <BS>  -        back to the parent struct
     r              refresh
     q              close
@@ -581,8 +582,13 @@ Values ~
   the field under the cursor in the same window ("mpc" -> "mpc.bus"), as
   deep as the fields go; <BS> or `-` goes back, with the cursor on the
   field you came from. The float title shows the path.
-- Cells: a window of one-line summaries; cell elements cannot be opened.
-  char arrays: a window of lines. Other classes, and struct arrays, get a
+- Cells: a window of one-line summaries. <CR> opens the element under the
+  cursor ("c" -> "c{2,3}"), and from there fields and elements go on
+  ("c{2,1}{1,2}.x"). A path is a name, then ".field", "{i}" or "{i,j}"
+  parts with plain positive integers only: no `end`, no variables, no
+  expressions. Neovim and Octave both check it, and Octave walks it
+  without evaluating anything.
+- char arrays: a window of lines. Other classes, and struct arrays, get a
   message.
 
 Numbers are shown with 5 significant digits, and integers exactly. The
