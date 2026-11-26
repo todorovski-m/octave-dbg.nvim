@@ -496,3 +496,31 @@ describe("viewer fields", function()
     assert.truthy(glines:find("mpc.bus  30x13 double", 1, true))
   end)
 end)
+
+describe("viewer cell from the cursor", function()
+  local viewer = require("octave_dbg.viewer")
+  -- " 9  42  0.5  -1.5e-07" / "10   7  100         0": cells end at bytes 5, 10, 20
+  local layout = { data_line = 7, count = 2, cols = 3, pos = { { 5, 10, 20 }, { 5, 10, 20 } } }
+
+  it("finds the cell under the cursor", function()
+    assert.same({ 1, 1 }, { viewer.cell_at(layout, 7, 4) })
+    assert.same({ 1, 2 }, { viewer.cell_at(layout, 7, 9) })
+    assert.same({ 2, 3 }, { viewer.cell_at(layout, 8, 20) })
+  end)
+
+  it("gives the gap and the gutter to the next cell, and the end to the last", function()
+    assert.same({ 1, 1 }, { viewer.cell_at(layout, 7, 0) })
+    assert.same({ 1, 2 }, { viewer.cell_at(layout, 7, 6) })
+    assert.same({ 1, 3 }, { viewer.cell_at(layout, 7, 99) })
+  end)
+
+  it("ignores header lines and lines past the data", function()
+    assert.is_nil(viewer.cell_at(layout, 3, 0))
+    assert.is_nil(viewer.cell_at(layout, 9, 0))
+  end)
+
+  it("uses column 1 for fields and list lines", function()
+    local fields = { data_line = 6, count = 3, cols = 0, pos = {} }
+    assert.same({ 2, 1 }, { viewer.cell_at(fields, 7, 15) })
+  end)
+end)

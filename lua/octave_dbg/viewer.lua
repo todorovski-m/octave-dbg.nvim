@@ -218,6 +218,34 @@ function M.field_at(a, r)
   return nil
 end
 
+--- The cell (row and column in the window, 1-based) at a cursor position,
+--- for any motion: arrows, a mouse click, `w`, a search. nil on a header
+--- line. Between two cells, the cell to the right counts (cells are
+--- right-aligned). Outside a grid, the column is 1.
+---@param layout table from M.render
+---@param line integer 1-based buffer line
+---@param col integer 0-based byte column
+---@return integer|nil r, integer|nil c
+function M.cell_at(layout, line, col)
+  if not layout or not layout.data_line or (layout.count or 0) < 1 then
+    return nil
+  end
+  local r = line - layout.data_line + 1
+  if r < 1 or r > layout.count then
+    return nil
+  end
+  local pos = layout.pos and layout.pos[r]
+  if not pos or #pos == 0 then
+    return r, 1
+  end
+  for c = 1, #pos do
+    if col <= pos[c] then
+      return r, c
+    end
+  end
+  return r, #pos
+end
+
 --- The name of a field of `parent`: "mpc" and "bus" give "mpc.bus".
 function M.child_name(parent, field)
   return parent .. "." .. field
@@ -662,6 +690,15 @@ local function set_keys(buf)
   map("G", act("last"), "last row")
   map("0", act("first_col"), "first column")
   map("$", act("last_col"), "last column")
+  -- The same with arrows and the page keys.
+  map("<Down>", act("down"), "next row")
+  map("<Up>", act("up"), "previous row")
+  map("<Right>", act("right"), "next column")
+  map("<Left>", act("left"), "previous column")
+  map("<PageDown>", act("page_down"), "page down")
+  map("<PageUp>", act("page_up"), "page up")
+  map("<Home>", act("first_col"), "first column")
+  map("<End>", act("last_col"), "last column")
   vim.keymap.set("n", "g", goto_prompt, { buffer = buf, desc = "octave-dbg viewer: go to row and column" })
   map("m", function()
     local v = state.view
@@ -790,6 +827,22 @@ function M.open(name)
   vim.wo[state.win].sidescrolloff = 0
   set_keys(buf)
   vim.api.nvim_create_autocmd("BufWipeout", { buffer = buf, once = true, callback = teardown })
+  -- Any other motion (a mouse click, w, a search): take the cell from the
+  -- real cursor, so that the cell line and <CR> follow what is on screen.
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    buffer = buf,
+    callback = function()
+      if not (valid() and state.layout and state.win and vim.api.nvim_win_is_valid(state.win)) then
+        return
+      end
+      local pos = vim.api.nvim_win_get_cursor(state.win)
+      local r, c = M.cell_at(state.layout, pos[1], pos[2])
+      if r and (r ~= state.cursor.r or c ~= state.cursor.c) then
+        state.cursor = { r = r, c = c }
+        redraw()
+      end
+    end,
+  })
   request_now()
 end
 

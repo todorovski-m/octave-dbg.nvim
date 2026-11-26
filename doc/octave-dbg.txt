@@ -548,12 +548,12 @@ then the statistics and the range that is shown.
 
     Key            Action ~
     j  k           cursor one row down, up (a sparse list: one entry);
-                   at the edge, the window moves
+                   at the edge, the window moves (also <Down> <Up>)
     h  l           cursor one column left, right; at the edge, the
-                   window moves
-    <C-d>  <C-u>   one page down, up
+                   window moves (also <Left> <Right>)
+    <C-d>  <C-u>   one page down, up (also <PageDown> <PageUp>)
     gg  G          first, last row
-    0  $           first, last column
+    0  $           first, last column (also <Home> <End>)
     g              go to a row and column: "120 5", "120" or ",5"
     m              sparse: switch between the nonzero list and the grid
     a              complex: switch re/im and magnitude/angle
@@ -561,6 +561,9 @@ then the statistics and the range that is shown.
     <BS>  -        back to the parent struct
     r              refresh
     q              close
+
+Other motions, such as a mouse click, `w` or a search, also move the
+cursor to a cell: the cell line and <CR> follow the cursor on screen.
 
 `g` is used for "go to", and `:` keeps its normal meaning. With `g` and
 `gg` both mapped, a single `g` waits for 'timeoutlen'.

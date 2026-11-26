@@ -184,10 +184,10 @@ the cell under the cursor, and for sparse values Octave's own line
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` / `h` / `l` | the cursor one row down or up, one column right or left; at an edge, the window moves |
-| `<C-d>` / `<C-u>` | one page down or up |
+| `j` / `k` / `h` / `l`, arrows | the cursor one row down or up, one column right or left; at an edge, the window moves |
+| `<C-d>` / `<C-u>`, `<PageDown>` / `<PageUp>` | one page down or up |
 | `gg` / `G` | first or last row |
-| `0` / `$` | first or last column |
+| `0` / `$`, `<Home>` / `<End>` | first or last column |
 | `g` | go to a row and column (`120 5`, `120`, or `,5`), with the cursor on that cell |
 | `m` | sparse: switch between the nonzero list and the grid |
 | `a` | complex: switch between real and imaginary parts and magnitude and angle |
@@ -196,6 +196,8 @@ the cell under the cursor, and for sparse values Octave's own line
 | `r` | refresh |
 | `q` | close |
 
+- **Other motions** (a mouse click, `w`, a search) also move the cursor
+  to a cell: the cell line and `<CR>` always follow the cursor on screen.
 - **Sparse values** open in the nonzero list: `(i, j) -> value` in
   column-major order, a page of `viewer_rows` entries at a time. The grid
   shows a window of the matrix with zeros as dots. `g` moves the grid to a
