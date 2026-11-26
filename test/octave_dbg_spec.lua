@@ -270,3 +270,108 @@ describe("help popup", function()
     assert.same({ "help nope: help: 'nope' not found" }, hover.format_help(e))
   end)
 end)
+
+describe("viewer", function()
+  local viewer = require("octave_dbg.viewer")
+  local ask = require("octave_dbg.ask")
+
+  it("parses sizes", function()
+    assert.same({ 1000, 1000 }, viewer.parse_size("1000x1000"))
+    assert.same({ 3, 4 }, viewer.parse_size("3x4x2"))
+    assert.same({ 0, 0 }, viewer.parse_size(nil))
+  end)
+
+  it("moves and clamps a grid window", function()
+    local v = { mode = "grid", row = 1, col = 1, rows = 1000, cols = 1000 }
+    assert.same({ 2, 1 }, { viewer.move(v, "down", 50, 15) })
+    assert.same({ 1, 1 }, { viewer.move(v, "up", 50, 15) })
+    assert.same({ 1, 2 }, { viewer.move(v, "right", 50, 15) })
+    assert.same({ 51, 1 }, { viewer.move(v, "page_down", 50, 15) })
+    assert.same({ 951, 1 }, { viewer.move(v, "last", 50, 15) })
+    assert.same({ 1, 986 }, { viewer.move(v, "last_col", 50, 15) })
+    v.row, v.col = 940, 990
+    assert.same({ 951, 986 }, { viewer.move(v, "page_down", 50, 15) })
+    assert.same({ 890, 986 }, { viewer.move(v, "page_up", 50, 15) })
+    assert.same({ 1, 986 }, { viewer.move(v, "first", 50, 15) })
+  end)
+
+  it("keeps a window that is larger than the value at 1, 1", function()
+    local v = { mode = "grid", row = 1, col = 1, rows = 4, cols = 4 }
+    assert.same({ 1, 1 }, { viewer.move(v, "down", 50, 15) })
+    assert.same({ 1, 1 }, { viewer.move(v, "last", 50, 15) })
+  end)
+
+  it("pages a sparse list by entries, without columns", function()
+    local v = { mode = "list", row = 1, col = 1, rows = 10000, cols = 10000, nnz = 3000 }
+    assert.same({ 51, 1 }, { viewer.move(v, "page_down", 50, 15) })
+    assert.same({ 2951, 1 }, { viewer.move(v, "last", 50, 15) })
+    assert.same({ 1, 1 }, { viewer.move(v, "right", 50, 15) })
+  end)
+
+  it("parses go to input", function()
+    assert.same({ 120, 5 }, { viewer.parse_goto("120 5") })
+    assert.same({ 120, 5 }, { viewer.parse_goto(" 120, 5 ") })
+    assert.same({ 120 }, { viewer.parse_goto("120") })
+    assert.same({ nil, 5 }, { viewer.parse_goto(",5") })
+    assert.same({}, { viewer.parse_goto("x") })
+    assert.same({}, { viewer.parse_goto("") })
+  end)
+
+  it("builds request fields", function()
+    local v = { name = "S", mode = "list", row = 51, col = 1, polar = false }
+    assert.same({ "S", "list", "51", "1", "50", "15", "cart" }, viewer.request_fields(v, 50, 15))
+    v.find, v.polar = { 5000, 100 }, true
+    assert.same({ "S", "find", "5000", "100", "50", "15", "polar" }, viewer.request_fields(v, 50, 15))
+    assert.same("grid", viewer.request_fields({ name = "st", mode = "fields", row = 1, col = 1 }, 50, 15)[2])
+  end)
+
+  it("switches a sparse view between list and grid", function()
+    local v = { kind = "sparse", mode = "list", row = 7, col = 1 }
+    local g = viewer.toggle_mode(v, { 9037, 13 })
+    assert.same({ "grid", 9037, 13 }, { g.mode, g.row, g.col })
+    local l = viewer.toggle_mode(g)
+    assert.same({ "list", { 9037, 13 } }, { l.mode, l.find })
+    local d = viewer.toggle_mode({ kind = "dense", mode = "grid", row = 1, col = 1 })
+    assert.equals("grid", d.mode)
+  end)
+
+  local function answer(text)
+    return ask.parse(text)
+  end
+
+  it("renders a grid with indices and aligned cells", function()
+    local a = answer("#\t1\nname\tM\nscope\tbase\nstatus\tok\nclass\tdouble\nsize\t1000x1000\nnumel\t1000000\nkind\tdense\nstats\tmin 0   max 42   mean 0.5\nmode\tgrid\nrow\t9\ncol\t1\nnrows\t2\nncols\t3\n#body\n42\t0.5\t-1.5e-07\n7\t100\t0\n#end\n")
+    local v = { name = "M", mode = "grid", rows = 1000, cols = 1000, kind = "dense" }
+    local lines = viewer.render(a, v)
+    assert.equals("M  1000x1000 double  (base workspace)", lines[1])
+    assert.equals("rows 9-10 of 1000, columns 1-3 of 1000", lines[4])
+    local n = #lines
+    assert.equals("     1    2         3", lines[n - 2])
+    assert.equals(" 9  42  0.5  -1.5e-07", lines[n - 1])
+    assert.equals("10   7  100         0", lines[n])
+  end)
+
+  it("renders a sparse list with positions", function()
+    local a = answer("#\t2\nname\tS\nscope\tbase\nstatus\tok\nclass\tdouble sparse\nsize\t10000x10000\nnumel\t100000000\nkind\tsparse\nnnz\t3000\nheader\tCompressed Column Sparse (rows = 10000, cols = 10000, nnz = 3000 [0.003%])\nstats\tmin 0   max 1   mean 1e-05\nmode\tlist\nfirst\t9\ncount\t2\n#body\n9037\t13\t0.81008\n12\t14\t0.134\n#end\n")
+    local v = { name = "S", mode = "list", rows = 10000, cols = 10000, nnz = 3000, kind = "sparse" }
+    local lines = viewer.render(a, v)
+    assert.equals("Compressed Column Sparse (rows = 10000, cols = 10000, nnz = 3000 [0.003%])", lines[2])
+    assert.equals("nonzeros 9-10 of 3000 (column-major)", lines[4])
+    assert.equals(" 9  (9037, 13) -> 0.81008", lines[#lines - 1])
+    assert.equals("10  (  12, 14) -> 0.134", lines[#lines])
+    assert.truthy(lines[5]:find("m grid", 1, true))
+  end)
+
+  it("renders struct fields, errors and the stale note", function()
+    local a = answer("#\t3\nname\tst\nscope\tdemo_add\t4\nstatus\tok\nclass\tstruct\nsize\t1x1\nnumel\t1\nkind\tstruct\nmode\tfields\nrow\t1\ncount\t2\ntotal\t2\n#body\nM\t4x4 double\t[4x4 double]\nname\t1x4 char\t'demo'\n#end\n")
+    local v = { name = "st", mode = "fields", kind = "struct", total = 2, stale = true }
+    local lines = viewer.render(a, v)
+    assert.equals("st  1x1 struct  (demo_add, line 4)", lines[1])
+    assert.equals("fields 1-2 of 2", lines[3])
+    assert.equals("(the debugger moved; press r to refresh)", lines[4])
+    assert.equals("M     4x4 double  [4x4 double]", lines[#lines - 1])
+    assert.equals("name  1x4 char    'demo'", lines[#lines])
+    local e = viewer.render(answer("#\t4\nname\tst.nope\nscope\tbase\nstatus\terror\nmessage\tst has no field nope\n#end\n"), {})
+    assert.same({ "st.nope: st has no field nope" }, e)
+  end)
+end)

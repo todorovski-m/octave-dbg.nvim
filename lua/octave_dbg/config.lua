@@ -61,6 +61,17 @@ M.defaults = {
   -- Most lines of the help popup shown at once (it can be scrolled).
   help_max_height = 20,
 
+  -- Value viewer --
+  -- Rows (and sparse list entries) and columns requested per window.
+  viewer_rows = 50,
+  viewer_cols = 15,
+  -- Milliseconds to wait for a window before showing "Octave is busy".
+  viewer_timeout = 2000,
+  -- Border of the viewer float (see :help nvim_open_win()).
+  viewer_border = "rounded",
+  -- "float", or an Ex command that opens a split, such as "botright 20split".
+  viewer_split = "float",
+
   -- MATLAB-style keys in Octave buffers: true, false, or a table that
   -- changes or (with false) removes single keys, for example
   -- { step = "<F8>", interrupt = false }. See :help octave-dbg-matlab-keys.
