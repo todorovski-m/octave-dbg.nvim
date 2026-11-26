@@ -23,10 +23,11 @@ CONTENTS                                               *octave-dbg-contents*
   6. Current-line marker ....................... |octave-dbg-marker|
   7. Variables panel ........................... |octave-dbg-panel|
   8. Hover ..................................... |octave-dbg-hover|
-  9. Breakpoints ............................... |octave-dbg-breakpoints|
- 10. Events and highlights ..................... |octave-dbg-events|
- 11. Health check .............................. |octave-dbg-health|
- 12. Octave notes and limits ................... |octave-dbg-notes|
+  9. Value viewer .............................. |octave-dbg-viewer|
+ 10. Breakpoints ............................... |octave-dbg-breakpoints|
+ 11. Events and highlights ..................... |octave-dbg-events|
+ 12. Health check .............................. |octave-dbg-health|
+ 13. Octave notes and limits ................... |octave-dbg-notes|
 
 ==============================================================================
 1. SETUP                                                  *octave-dbg-setup*
@@ -118,6 +119,10 @@ a subcommand, it runs `status`.
     Show Octave's `help` for [name], or for the name under the cursor, in a
     popup (F1 in MATLAB). See |octave-dbg-help-popup|.
 
+:OctaveDbg view [name]                                     *:OctaveDbg-view*
+    Open the value viewer for [name], or for the variable or struct field
+    under the cursor. See |octave-dbg-viewer|.
+
 :OctaveDbg status                                        *:OctaveDbg-status*
     Show the REPL state, the Octave command, the restart count, the number
     of commands sent, where the debugger stopped, whether the panel is open,
@@ -160,6 +165,11 @@ Defaults: >lua
       hover_max_elements = 1000,
       hover_border = "rounded",
       help_max_height = 20,
+      viewer_rows = 50,
+      viewer_cols = 15,
+      viewer_timeout = 2000,
+      viewer_border = "rounded",
+      viewer_split = "float",
       matlab_keys = false,
     })
 <
@@ -255,6 +265,20 @@ help_max_height                          *octave-dbg-option-help_max_height*
     Most lines of the help popup shown at once. Press the key again to enter
     the popup and scroll.
 
+viewer_rows, viewer_cols                      *octave-dbg-option-viewer_rows*
+    Size of one viewer window: rows (or sparse list entries) and columns.
+
+viewer_timeout                            *octave-dbg-option-viewer_timeout*
+    Milliseconds to wait for a window before the viewer says that Octave is
+    busy.
+
+viewer_border                              *octave-dbg-option-viewer_border*
+    Border of the viewer float, as for |nvim_open_win()|.
+
+viewer_split                                *octave-dbg-option-viewer_split*
+    `"float"`, or an Ex command that opens a split for the viewer, such as
+    `"botright 20split"`.
+
 matlab_keys                                  *octave-dbg-option-matlab_keys*
     MATLAB-style keys: `true`, `false`, or a table. See
     |octave-dbg-matlab-keys|.
@@ -275,6 +299,7 @@ created in buffers of the `filetypes`, under `keymap_prefix`:
     v     n       toggle variables panel
     h     n       show variable under cursor
     d     n       help for name under cursor
+    V     n       value viewer for name under cursor
     C     n       clc
     x     n       close all figures
     b     n       toggle breakpoint
@@ -374,6 +399,9 @@ hover()                                               *octave_dbg.hover()*
 help([{name}])                                         *octave_dbg.help()*
     Same as |:OctaveDbg-help|.
 
+view([{name}])                                         *octave_dbg.view()*
+    Same as |:OctaveDbg-view|.
+
 run_or_continue()                           *octave_dbg.run_or_continue()*
     Continue when the debugger is stopped, else save and run the file.
 
@@ -461,8 +489,11 @@ The popup shows the name, size, class and scope (the base workspace, or the
 function and line where the debugger stopped), then Octave's own `disp`
 output in the current `format`, without the "Columns 1 through N" splits,
 cut to `hover_max_lines` lines. A value with more than `hover_max_elements`
-elements gets a summary: min, max and mean for real numbers and logicals,
-and the top-left 5x5 part.
+elements gets a summary: min, max and mean (of `abs` for complex values) and
+the top-left 5x5 part. A sparse value counts by its number of nonzeros; a
+large one shows Octave's header line, the statistics and the first 20
+nonzero entries. For a summary, `<CR>` in the popup (enter it by pressing
+the key again) opens the value viewer, see |octave-dbg-viewer|.
 
 Only names are looked up, never expressions. If the first part of the name
 is not a variable in the frame of the prompt, the popup says "not a
@@ -494,7 +525,56 @@ stored. On a comment line, Octave stops at the next code line. When the
 cursor line already has a breakpoint, it simply runs or continues.
 
 ==============================================================================
-9. BREAKPOINTS                                      *octave-dbg-breakpoints*
+9. VALUE VIEWER                                          *octave-dbg-viewer*
+
+|:OctaveDbg-view| opens a read-only buffer, by default in a float (option
+`viewer_split`), that shows one window of a value: `viewer_rows` x
+`viewer_cols` cells of a matrix, with column indices on top and row indices
+in a gutter. Each move asks Octave for a new window; Octave never formats
+the whole value. It also opens with <CR> in the hover popup of a large
+value.
+
+The header shows the name, size, class and scope, the number of elements
+or, for a sparse value, Octave's own line
+>
+    Compressed Column Sparse (rows = R, cols = C, nnz = N [P%])
+<
+then the statistics and the range that is shown.
+
+    Key            Action ~
+    j  k           one row down, up (a sparse list: one entry)
+    h  l           one column left, right
+    <C-d>  <C-u>   one page down, up
+    gg  G          first, last rows
+    0  $           first, last columns
+    g              go to a row and column: "120 5", "120" or ",5"
+    m              sparse: switch between the nonzero list and the grid
+    a              complex: switch re/im and magnitude/angle
+    r              refresh
+    q              close
+
+`g` is used for "go to", and `:` keeps its normal meaning. With `g` and
+`gg` both mapped, a single `g` waits for 'timeoutlen'.
+
+Values ~
+- Dense numeric and logical values: a grid window. N-D arrays show their
+  first page.
+- Sparse values open in the nonzero list: "(i, j) -> value" in
+  column-major order, `viewer_rows` entries per page, from `find`. The grid
+  is `full()` of the window only, with zeros shown as a dot. In the list,
+  `g` goes to the first nonzero at or after a row and column.
+- Complex values: real and imaginary parts, or magnitude and angle in
+  degrees after `a`. Statistics use `abs`.
+- Cells: a window of one-line summaries. A struct: its fields (one level),
+  with size, class and a short value. char arrays: a window of lines.
+  Other classes, and struct arrays, get a message.
+
+Numbers are shown with 5 significant digits, and integers exactly. The
+viewer is not refreshed when the debugger stops again; it is marked, and
+`r` refreshes it. Editing values is not supported.
+
+==============================================================================
+10. BREAKPOINTS                                     *octave-dbg-breakpoints*
 
 The plugin keeps the list of breakpoints itself and draws them as signs
 (`sign_text`, `sign_hl`). The signs move with the text when you edit.
@@ -529,7 +609,7 @@ A message names the lines that changed, for example
 Breakpoints that you set by typing `dbstop` in the REPL are not shown.
 
 ==============================================================================
-10. EVENTS AND HIGHLIGHTS                                *octave-dbg-events*
+11. EVENTS AND HIGHLIGHTS                                *octave-dbg-events*
 
                                                       *OctaveDbgReplStarted*
 User OctaveDbgReplStarted
@@ -566,7 +646,7 @@ OctaveDbgCurrentLine
     vim.api.nvim_set_hl(0, "OctaveDbgCurrentLine", { bg = "#3b3052" })
 <
 ==============================================================================
-11. HEALTH CHECK                                          *octave-dbg-health*
+12. HEALTH CHECK                                          *octave-dbg-health*
 
 `:checkhealth octave_dbg` checks the Neovim version, that the Octave
 executable from `cmd` is on $PATH, the Octave version, and whether the REPL
@@ -577,7 +657,7 @@ loaded. Before that, it reports "No healthcheck found". Open a `.m` file or
 run `:OctaveDbg status` first.
 
 ==============================================================================
-12. OCTAVE NOTES AND LIMITS                                *octave-dbg-notes*
+13. OCTAVE NOTES AND LIMITS                                *octave-dbg-notes*
 
 Tested with GNU Octave 11.1.0 on macOS.
 
@@ -601,7 +681,8 @@ Tested with GNU Octave 11.1.0 on macOS.
 - When Octave is killed, it may write an `octave-workspace` file in its
   working folder.
 - While you type at the prompt, the panel may lag by a fraction of a second.
-- The hover and the panel only update while Octave waits at a prompt.
+- The hover, the panel and the viewer only update while Octave waits at a
+  prompt.
 - `F5` decides between run and continue from the current-line marker, so
   it needs `marker = true` (the default) to continue.
 

@@ -15,6 +15,8 @@ terminal job.
 - Watch the variables of the stopped frame in a panel that refreshes itself.
 - Hover a variable or struct field to see its value; press F1 for Octave's
   help on the name under the cursor.
+- Browse large matrices, including sparse and complex ones, in a viewer
+  that only ever asks Octave for the part on screen.
 - Optional MATLAB-style keys: F5 run or continue, F10 step, F11 step in,
   F12 breakpoint, and more.
 
@@ -84,6 +86,7 @@ the status.
 | `whos` / `clc` / `close` | `whos` / `clc` / `close all` |
 | `panel` | Toggle the variables panel |
 | `hover` | Show the variable or struct field under the cursor in a popup |
+| `view [name]` | Open the value viewer (default: the name under the cursor) |
 | `help [name]` | Octave `help` for a name (default: under the cursor) in a popup |
 | `status` | REPL state, stop location, panel and breakpoints |
 | `debug` | Scratch buffer with the exact commands sent and recent output |
@@ -109,6 +112,7 @@ LazyVim), the prefix shows as the group "Octave".
 | `v` | variables panel | `t` | run to cursor |
 | `h` | hover | `k` | interrupt (Ctrl+C) |
 | `d` | help for name under cursor | `q` | quit debugging |
+| `V` | value viewer | | |
 | `C` | clc | `x` | close all figures |
 
 ### MATLAB keys (`matlab_keys = true`)
@@ -161,9 +165,44 @@ the base workspace. It refreshes by itself at every prompt.
 cursor in a floating window: name, size, class, scope and Octave's own
 `disp` output in the current `format`. With the cursor on `b` in `s.a.b`,
 it shows `s.a.b`; on `a`, it shows `s.a`. Large values get a summary (min,
-max, mean and the top-left 5x5). Only names are looked up: if the name is
-not a variable, the popup says so, and nothing is run. Press the key again
-to enter the popup.
+max, mean and the top-left 5x5; for a sparse value, Octave's header and the
+first nonzero entries). Only names are looked up: if the name is not a
+variable, the popup says so, and nothing is run. Press the key again to
+enter the popup. For a large value, `<CR>` in the popup opens the value
+viewer.
+
+**Value viewer.** `:OctaveDbg view [name]` (or `<leader>oV`) opens a
+read-only buffer, by default in a float, that shows one window of a value:
+`viewer_rows` x `viewer_cols` cells (50 x 15) of a matrix, with row and
+column indices. Each move asks Octave for a new window; the whole value is
+never formatted. The header shows the name, size, class, scope, statistics
+and the shown range, and for sparse values Octave's own line
+`Compressed Column Sparse (rows = R, cols = C, nnz = N [P%])`.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` / `h` / `l` | one row down or up, one column right or left |
+| `<C-d>` / `<C-u>` | one page down or up |
+| `gg` / `G` | first or last rows |
+| `0` / `$` | first or last columns |
+| `g` | go to a row and column (`120 5`, `120`, or `,5`) |
+| `m` | sparse: switch between the nonzero list and the grid |
+| `a` | complex: switch between real and imaginary parts and magnitude and angle |
+| `r` | refresh |
+| `q` | close |
+
+- **Sparse values** open in the nonzero list: `(i, j) -> value` in
+  column-major order, a page of `viewer_rows` entries at a time. The grid
+  shows a window of the matrix with zeros as dots. `g` moves the grid to a
+  row and column, and in the list it goes to the first nonzero at or after
+  them.
+- **Complex values** show real and imaginary parts, or magnitude and angle
+  in degrees after `a`.
+- **Cells** show a window of one-line summaries, **structs** their fields
+  (one level), and **char** arrays a window of lines. N-D arrays show their
+  first page. Other classes get a message.
+- The viewer is **not refreshed** when the debugger stops again; it is
+  marked, and `r` refreshes it.
 
 **Help.** `:OctaveDbg help` shows `help NAME` for the name under the cursor
 in a popup that can be scrolled.
@@ -200,6 +239,11 @@ require("octave_dbg").setup({
   hover_max_elements = 1000, -- larger values get a summary
   hover_border = "rounded",
   help_max_height = 20,      -- help popup height (it can be scrolled)
+  viewer_rows = 50,          -- rows (or sparse list entries) per window
+  viewer_cols = 15,          -- columns per window
+  viewer_timeout = 2000,     -- ms before the viewer says "Octave is busy"
+  viewer_border = "rounded",
+  viewer_split = "float",    -- or an Ex command, such as "botright 20split"
 })
 ```
 
@@ -220,7 +264,7 @@ od.toggle_breakpoint(line?) od.clear_breakpoints()
 od.step() od.step_in() od.step_out() od.continue() od.quit()
 od.whos() od.clc() od.close_figures() od.status() od.debug()
 od.panel() od.open_panel() od.close_panel()
-od.hover() od.help(name?)
+od.hover() od.help(name?) od.view(name?)
 od.location() -- { name, line, path } where the debugger stopped, or nil
 ```
 
@@ -274,6 +318,17 @@ Notes on Octave's debugger that shape the plugin (Octave 11.1):
   It also turns `split_long_rows` off while it runs `disp`, so that wide
   rows are not split into "Columns 1 through 3" blocks, and restores the
   setting after.
+- **Sparse values** are judged by their number of nonzeros, not by rows
+  times columns, so a 10000x10000 sparse matrix with a few thousand
+  nonzeros is shown with its header and entries. Their statistics come from
+  the nonzeros only: `mean` over all elements of such a matrix takes
+  minutes, and the hook runs in Octave's main thread. For complex values,
+  the statistics use `abs`.
+- **The viewer** sends a request with the name, the mode, the window
+  position and size, and real/imaginary or magnitude/angle. Octave answers
+  with that window only (`octave/octave_dbg_view.m`): a slice of a dense
+  matrix, `full()` of a slice of a sparse one, or a page of `find()` for the
+  nonzero list.
 
 ## Limitations
 
@@ -285,6 +340,9 @@ Notes on Octave's debugger that shape the plugin (Octave 11.1):
   a prompt; while a command runs, the popup says that Octave is busy.
 - When Octave is killed, it may write an `octave-workspace` file in its
   working folder.
+- The viewer shows values but cannot edit them. It shows one struct, not
+  struct arrays, and the first page of N-D arrays. Numbers are shown with 5
+  significant digits (integers exactly), not in Octave's current `format`.
 
 ## Development
 
@@ -307,7 +365,9 @@ nvim --headless --noplugin -u test/minimal_init.lua \
 ```
 
 `test/demo_script.m` (a script with two cells) and `test/demo_add.m` (a
-function it calls) are small files for manual tests.
+function it calls) are small files for manual tests. `test/view_dense.m`,
+`test/view_sparse.m`, `test/view_complex.m` and `test/view_struct.m` set up
+values for the viewer and say what to try.
 
 In the Octave helpers, write `min(5, n)` and not `min (5, n)` inside
 `[...]` or `{...}`: there, Octave reads a space as an element separator.
