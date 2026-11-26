@@ -266,7 +266,8 @@ help_max_height                          *octave-dbg-option-help_max_height*
     the popup and scroll.
 
 viewer_rows, viewer_cols                      *octave-dbg-option-viewer_rows*
-    Size of one viewer window: rows (or sparse list entries) and columns.
+    Largest viewer window: rows (or sparse list entries) and columns. The
+    viewer asks for fewer when fewer fit in its window.
 
 viewer_timeout                            *octave-dbg-option-viewer_timeout*
     Milliseconds to wait for a window before the viewer says that Octave is
@@ -528,11 +529,13 @@ cursor line already has a breakpoint, it simply runs or continues.
 9. VALUE VIEWER                                          *octave-dbg-viewer*
 
 |:OctaveDbg-view| opens a read-only buffer, by default in a float (option
-`viewer_split`), that shows one window of a value: `viewer_rows` x
-`viewer_cols` cells of a matrix, with column indices on top and row indices
-in a gutter. Each move asks Octave for a new window; Octave never formats
-the whole value. It also opens with <CR> in the hover popup of a large
-value.
+`viewer_split`), that shows one window of a value: as many rows and columns
+as fit in the window, at most `viewer_rows` x `viewer_cols`, with column
+indices on top and row indices in a gutter. The keys move a cursor over the
+cells, as in a spreadsheet; at an edge, the viewer asks Octave for the next
+window, so Octave never formats the whole value. A header line shows the
+cell under the cursor. It also opens with <CR> in the hover popup of a
+large value.
 
 The header shows the name, size, class and scope, the number of elements
 or, for a sparse value, Octave's own line
@@ -542,11 +545,13 @@ or, for a sparse value, Octave's own line
 then the statistics and the range that is shown.
 
     Key            Action ~
-    j  k           one row down, up (a sparse list: one entry)
-    h  l           one column left, right
+    j  k           cursor one row down, up (a sparse list: one entry);
+                   at the edge, the window moves
+    h  l           cursor one column left, right; at the edge, the
+                   window moves
     <C-d>  <C-u>   one page down, up
-    gg  G          first, last rows
-    0  $           first, last columns
+    gg  G          first, last row
+    0  $           first, last column
     g              go to a row and column: "120 5", "120" or ",5"
     m              sparse: switch between the nonzero list and the grid
     a              complex: switch re/im and magnitude/angle

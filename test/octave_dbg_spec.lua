@@ -375,3 +375,94 @@ describe("viewer", function()
     assert.same({ "st.nope: st has no field nope" }, e)
   end)
 end)
+
+describe("viewer cursor", function()
+  local viewer = require("octave_dbg.viewer")
+  local ask = require("octave_dbg.ask")
+  -- rand(50) in a float that shows 26 rows and 15 columns
+  local function v50(row, col)
+    return { mode = "grid", row = row, col = col, rows = 50, cols = 50 }
+  end
+  local shown = { rows = 26, cols = 15 }
+
+  local function step(v, r, c, action)
+    local row, col, cur = viewer.step(v, { r = r, c = c }, action, shown, 26, 15)
+    return { row, col, cur.r, cur.c }
+  end
+
+  it("moves the cursor inside the window without a new window", function()
+    assert.same({ 1, 1, 2, 1 }, step(v50(1, 1), 1, 1, "down"))
+    assert.same({ 1, 1, 1, 2 }, step(v50(1, 1), 1, 1, "right"))
+    assert.same({ 1, 1, 1, 1 }, step(v50(1, 1), 1, 1, "up"))
+  end)
+
+  it("moves the window at an edge", function()
+    assert.same({ 2, 1, 26, 1 }, step(v50(1, 1), 26, 1, "down"))
+    assert.same({ 1, 2, 1, 15 }, step(v50(1, 1), 1, 15, "right"))
+    assert.same({ 24, 1, 1, 1 }, step(v50(25, 1), 1, 1, "up"))
+  end)
+
+  it("stops at the last row and column of the value", function()
+    assert.same({ 25, 1, 26, 1 }, step(v50(25, 1), 26, 1, "down"))
+    assert.same({ 1, 36, 1, 15 }, step(v50(1, 36), 1, 15, "right"))
+  end)
+
+  it("pages, and goes to the first and last rows and columns", function()
+    assert.same({ 25, 1, 26, 1 }, step(v50(1, 1), 3, 1, "last"))
+    assert.same({ 1, 1, 1, 1 }, step(v50(25, 1), 9, 1, "first"))
+    assert.same({ 25, 1, 3, 1 }, step(v50(1, 1), 3, 1, "page_down"))
+    assert.same({ 25, 1, 26, 1 }, step(v50(25, 1), 3, 1, "page_down"))
+    assert.same({ 1, 1, 1, 1 }, step(v50(1, 1), 3, 1, "page_up"))
+    assert.same({ 1, 36, 1, 15 }, step(v50(1, 1), 1, 4, "last_col"))
+    assert.same({ 1, 1, 1, 1 }, step(v50(1, 36), 1, 9, "first_col"))
+  end)
+
+  it("moves only the cursor in a value that fits", function()
+    local v = { mode = "grid", row = 1, col = 1, rows = 4, cols = 4 }
+    local s4 = { rows = 4, cols = 4 }
+    local row, col, cur = viewer.step(v, { r = 3, c = 1 }, "down", s4, 26, 15)
+    assert.same({ 1, 1, 4, 1 }, { row, col, cur.r, cur.c })
+    row, col, cur = viewer.step(v, { r = 4, c = 1 }, "down", s4, 26, 15)
+    assert.same({ 1, 1, 4, 1 }, { row, col, cur.r, cur.c })
+    row, col, cur = viewer.step(v, { r = 1, c = 1 }, "last", s4, 26, 15)
+    assert.same({ 1, 1, 4, 1 }, { row, col, cur.r, cur.c })
+  end)
+
+  it("moves over list entries, not columns", function()
+    local v = { mode = "list", row = 1, col = 1, nnz = 3000 }
+    local row, col, cur = viewer.step(v, { r = 1, c = 1 }, "down", { rows = 26, cols = 1 }, 26, 15)
+    assert.same({ 1, 1, 2, 1 }, { row, col, cur.r, cur.c })
+    row, col, cur = viewer.step(v, { r = 1, c = 1 }, "right", { rows = 26, cols = 1 }, 26, 15)
+    assert.same({ 1, 1, 1, 1 }, { row, col, cur.r, cur.c })
+  end)
+
+  it("shows the cell under the cursor and where each cell is", function()
+    local a = ask.parse("#\t1\nname\tM\nscope\tbase\nstatus\tok\nclass\tdouble\nsize\t50x50\nnumel\t2500\nkind\tdense\nmode\tgrid\nrow\t9\ncol\t1\nnrows\t2\nncols\t3\n#body\n42\t0.5\t-1.5e-07\n7\t100\t0\n#end\n")
+    local lines, _, layout = viewer.render(a, { name = "M", mode = "grid", rows = 50, cols = 50, kind = "dense" }, { r = 2, c = 3 })
+    assert.truthy(vim.tbl_contains(lines, "cell (10, 3): 0"))
+    assert.equals(2, layout.count)
+    assert.equals(3, layout.cols)
+    assert.equals("10   7  100         0", lines[layout.data_line + 1])
+    -- the cursor goes on the last character of the cell
+    assert.equals("0", lines[layout.data_line + 1]:sub(layout.pos[2][3] + 1, layout.pos[2][3] + 1))
+    assert.equals("7", lines[layout.data_line + 1]:sub(layout.pos[2][1] + 1, layout.pos[2][1] + 1))
+  end)
+end)
+
+describe("viewer column fit", function()
+  local viewer = require("octave_dbg.viewer")
+  it("counts the columns that fit across the window", function()
+    local line = " 1  0.99766  0.61905  0.29818"
+    local pos = { 10, 19, 28 }
+    assert.same({ 3, 9 }, { viewer.fit_columns(line, pos, 40) })
+    assert.same({ 2, 9 }, { viewer.fit_columns(line, pos, 25) })
+    assert.same({ 0, 9 }, { viewer.fit_columns(line, pos, 5) })
+  end)
+  it("measures display width, not bytes", function()
+    local line = " 1  1 ∠ 90°  1 ∠ 180°"
+    local p1 = #" 1  1 ∠ 90°" - 1
+    local p2 = #line - 1
+    local fit = viewer.fit_columns(line, { p1, p2 }, 12)
+    assert.equals(1, fit)
+  end)
+end)

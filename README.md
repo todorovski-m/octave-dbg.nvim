@@ -173,19 +173,21 @@ viewer.
 
 **Value viewer.** `:OctaveDbg view [name]` (or `<leader>oV`) opens a
 read-only buffer, by default in a float, that shows one window of a value:
-`viewer_rows` x `viewer_cols` cells (50 x 15) of a matrix, with row and
-column indices. Each move asks Octave for a new window; the whole value is
-never formatted. The header shows the name, size, class, scope, statistics
-and the shown range, and for sparse values Octave's own line
+as many rows and columns as fit in the float, at most `viewer_rows` x
+`viewer_cols` (50 x 15), with row and column indices. The keys move a
+cursor over the cells, as in a spreadsheet; at an edge, the viewer asks
+Octave for the next window, so the whole value is never formatted. The
+header shows the name, size, class, scope, statistics, the shown range and
+the cell under the cursor, and for sparse values Octave's own line
 `Compressed Column Sparse (rows = R, cols = C, nnz = N [P%])`.
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` / `h` / `l` | one row down or up, one column right or left |
+| `j` / `k` / `h` / `l` | the cursor one row down or up, one column right or left; at an edge, the window moves |
 | `<C-d>` / `<C-u>` | one page down or up |
-| `gg` / `G` | first or last rows |
-| `0` / `$` | first or last columns |
-| `g` | go to a row and column (`120 5`, `120`, or `,5`) |
+| `gg` / `G` | first or last row |
+| `0` / `$` | first or last column |
+| `g` | go to a row and column (`120 5`, `120`, or `,5`), with the cursor on that cell |
 | `m` | sparse: switch between the nonzero list and the grid |
 | `a` | complex: switch between real and imaginary parts and magnitude and angle |
 | `r` | refresh |
@@ -239,8 +241,8 @@ require("octave_dbg").setup({
   hover_max_elements = 1000, -- larger values get a summary
   hover_border = "rounded",
   help_max_height = 20,      -- help popup height (it can be scrolled)
-  viewer_rows = 50,          -- rows (or sparse list entries) per window
-  viewer_cols = 15,          -- columns per window
+  viewer_rows = 50,          -- most rows (or sparse list entries) per window
+  viewer_cols = 15,          -- most columns per window
   viewer_timeout = 2000,     -- ms before the viewer says "Octave is busy"
   viewer_border = "rounded",
   viewer_split = "float",    -- or an Ex command, such as "botright 20split"

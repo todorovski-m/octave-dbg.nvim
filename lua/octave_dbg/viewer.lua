@@ -4,8 +4,11 @@
 -- for one window (see octave_dbg_view.m), through the shared hook and the
 -- request code in ask.lua. Dense values and the grid mode of sparse values
 -- show `viewer_rows` x `viewer_cols` cells; the list mode of sparse values
--- shows `viewer_rows` nonzero entries. The viewer is not refreshed by itself
--- when the debugger moves; `r` refreshes it.
+-- shows `viewer_rows` nonzero entries (fewer when the window is lower, so
+-- that every row that is fetched is also visible). The keys move a cursor
+-- over the cells on screen, like in a spreadsheet; only at an edge is the
+-- next window requested. The viewer is not refreshed by itself when the
+-- debugger moves; `r` refreshes it.
 
 local config = require("octave_dbg.config")
 local ask = require("octave_dbg.ask")
@@ -84,6 +87,66 @@ function M.move(v, action, nrows, ncols)
     col = last_col
   end
   return clamp(row, 1, last_row), clamp(col, 1, last_col)
+end
+
+--- The window and the cursor after a key, as in a spreadsheet: the cursor
+--- moves over the cells on screen, and the window moves only when the
+--- cursor is at an edge (or for page, first and last).
+---@param v table view state: mode, row, col, rows, cols, nnz, total
+---@param cur table cursor { r, c }, relative to the window (1-based)
+---@param action string as for M.move
+---@param shown table { rows, cols } on screen now
+---@param nrows integer window height for the next request
+---@param ncols integer window width for the next request
+---@return integer row, integer col, table cursor { r, c }
+function M.step(v, cur, action, shown, nrows, ncols)
+  local row, col, r, c = v.row, v.col, cur.r, cur.c
+  local srows, scols = math.max(1, shown.rows or 1), math.max(1, shown.cols or 1)
+  local total_rows, total_cols = M.extent(v), v.cols or 0
+  local grid = v.mode == "grid"
+  if action == "down" then
+    if r < srows then
+      r = r + 1
+    elseif row + srows - 1 < total_rows then
+      row = row + 1
+    end
+  elseif action == "up" then
+    if r > 1 then
+      r = r - 1
+    elseif row > 1 then
+      row = row - 1
+    end
+  elseif grid and action == "right" then
+    if c < scols then
+      c = c + 1
+    elseif col + scols - 1 < total_cols then
+      col = col + 1
+    end
+  elseif grid and action == "left" then
+    if c > 1 then
+      c = c - 1
+    elseif col > 1 then
+      col = col - 1
+    end
+  elseif action == "page_down" or action == "page_up" or action == "first" or action == "last"
+    or (grid and (action == "first_col" or action == "last_col")) then
+    local new_row, new_col = M.move(v, action, nrows, ncols)
+    if action == "first" then
+      r = 1
+    elseif action == "last" then
+      r = math.max(1, math.min(nrows, total_rows - new_row + 1))
+    elseif action == "page_down" and new_row == row then
+      r = srows -- already at the end: go to the last row
+    elseif action == "page_up" and new_row == row then
+      r = 1
+    elseif action == "first_col" then
+      c = 1
+    elseif action == "last_col" then
+      c = math.max(1, math.min(ncols, total_cols - new_col + 1))
+    end
+    row, col = new_row, new_col
+  end
+  return row, col, { r = r, c = c }
 end
 
 --- Parse the answer to "go to": "120 5", "120,5", "120" (keep the column)
@@ -205,18 +268,33 @@ local function hint_line(v)
   return table.concat(keys, "  ")
 end
 
---- Lines and highlights for an answer.
+--- Lines, highlights and layout for an answer.
 ---@param a table parsed answer (ask.parse)
 ---@param v table view state
----@return string[] lines, table[] hl { line, col_start, col_end, group }
-function M.render(a, v)
+---@param cursor table|nil { r, c }: adds a line with the cell under it (grid)
+---@return string[] lines, table[] hl { line, col_start, col_end, group },
+---        table layout { data_line (1-based), count, cols, pos[row][col] = byte column }
+function M.render(a, v, cursor)
   if a.status == "notvar" then
-    return { ("%s: not a variable (%s)"):format(a.name, ask.scope_text(a)) }, {}
+    return { ("%s: not a variable (%s)"):format(a.name, ask.scope_text(a)) }, {}, { data_line = 1, count = 0, cols = 0, pos = {} }
   elseif a.status ~= "ok" then
-    return { ("%s: %s"):format(a.name, a.message or "error") }, {}
+    return { ("%s: %s"):format(a.name, a.message or "error") }, {}, { data_line = 1, count = 0, cols = 0, pos = {} }
   end
   local lines = header_lines(a, v)
   local hl = { { 0, 0, -1, "Title" } }
+  local body_rows = {}
+  for _, line in ipairs(a.body) do
+    if line ~= "" then
+      table.insert(body_rows, vim.split(line, "\t", { plain = true }))
+    end
+  end
+  if cursor and a.mode == "grid" then
+    local cell = body_rows[cursor.r] and body_rows[cursor.r][cursor.c]
+    if cell then
+      table.insert(lines, ("cell (%d, %d): %s"):format((tonumber(a.row) or 1) + cursor.r - 1, (tonumber(a.col) or 1) + cursor.c - 1, cell))
+      table.insert(hl, { #lines - 1, 0, -1, "Identifier" })
+    end
+  end
   if v.stale then
     table.insert(lines, "(the debugger moved; press r to refresh)")
     table.insert(hl, { #lines - 1, 0, -1, "WarningMsg" })
@@ -225,12 +303,8 @@ function M.render(a, v)
   table.insert(hl, { #lines - 1, 0, -1, "Comment" })
   table.insert(lines, "")
 
-  local rows = {}
-  for _, line in ipairs(a.body) do
-    if line ~= "" then
-      table.insert(rows, vim.split(line, "\t", { plain = true }))
-    end
-  end
+  local rows = body_rows
+  local layout = { count = 0, cols = 0, pos = {} }
 
   if a.mode == "grid" then
     local r1, c1 = tonumber(a.row) or 1, tonumber(a.col) or 1
@@ -252,15 +326,21 @@ function M.render(a, v)
     end
     table.insert(lines, table.concat(head, "  "))
     table.insert(hl, { #lines - 1, 0, -1, "LineNr" })
+    layout.data_line = #lines + 1
+    layout.cols = ncols
     for k, r in ipairs(rows) do
-      local cells = { pad_left(tostring(r1 + k - 1), gutter) }
+      local text = pad_left(tostring(r1 + k - 1), gutter)
+      local pos = {}
       for c = 1, ncols do
-        table.insert(cells, pad_left(r[c] or "", widths[c]))
+        text = text .. "  " .. pad_left(r[c] or "", widths[c])
+        pos[c] = #text - 1 -- the last byte of the cell
       end
-      table.insert(lines, table.concat(cells, "  "))
+      layout.pos[k] = pos
+      table.insert(lines, text)
       table.insert(hl, { #lines - 1, 0, gutter, "LineNr" })
     end
   elseif a.mode == "list" then
+    layout.data_line = #lines + 1
     local first = tonumber(a.first) or 1
     local wi, wj, wk = 1, 1, #tostring(first + #rows - 1)
     for _, r in ipairs(rows) do
@@ -273,6 +353,7 @@ function M.render(a, v)
       table.insert(hl, { #lines - 1, 0, wk, "LineNr" })
     end
   elseif a.mode == "fields" then
+    layout.data_line = #lines + 1
     local w1, w2 = 1, 1
     for _, r in ipairs(rows) do
       w1 = math.max(w1, vim.fn.strdisplaywidth(r[1] or ""))
@@ -282,6 +363,7 @@ function M.render(a, v)
       table.insert(lines, ("%s  %s  %s"):format(pad_right(r[1] or "", w1), pad_right(r[2] or "", w2), r[3] or ""))
     end
   else -- lines (char)
+    layout.data_line = #lines + 1
     local r1 = tonumber(a.row) or 1
     local gutter = #tostring(r1 + #a.body)
     local k = 0
@@ -291,7 +373,8 @@ function M.render(a, v)
       k = k + 1
     end
   end
-  return lines, hl
+  layout.count = #lines - layout.data_line + 1
+  return lines, hl, layout
 end
 
 -- The buffer -----------------------------------------------------------------
@@ -318,9 +401,95 @@ local function draw(lines, hl)
   end
 end
 
+-- The window to request: at most viewer_rows x viewer_cols, no more rows
+-- than fit below the header and no more columns than fit across, so that
+-- every fetched cell is visible.
 local function window_size()
   local b = state.source_buf
-  return config.get("viewer_rows", b), config.get("viewer_cols", b)
+  local max_rows, max_cols = config.get("viewer_rows", b), config.get("viewer_cols", b)
+  local before = state.layout and state.layout.data_line and (state.layout.data_line - 1) or 9
+  local height = (state.win and vim.api.nvim_win_is_valid(state.win)) and vim.api.nvim_win_get_height(state.win) or max_rows
+  local ncols = math.min(max_cols, state.fit_cols or max_cols)
+  return math.max(1, math.min(max_rows, height - before)), math.max(1, ncols)
+end
+
+--- How many grid columns of a rendered window fit into `width` display
+--- columns, and the display width of one column. Pure; exposed for tests.
+---@param line string a rendered data row
+---@param pos integer[] byte column of the last byte of each cell
+---@param width integer
+---@return integer fit, number col_width
+function M.fit_columns(line, pos, width)
+  local fit, last_end, first_end = 0, 0, nil
+  for c = 1, #pos do
+    local e = vim.fn.strdisplaywidth(line:sub(1, pos[c] + 1))
+    first_end = first_end or e
+    if e <= width then
+      fit = c
+    end
+    last_end = e
+  end
+  local col_width = #pos > 1 and (last_end - first_end) / (#pos - 1) or last_end
+  return fit, col_width
+end
+
+-- Defined below; redraw asks for a new window when the columns do not fit.
+local request
+
+-- Draw the last answer with the cursor, and put the cursor on its cell.
+local function redraw()
+  if not (valid() and state.answer) then
+    return
+  end
+  local lines, hl, layout = M.render(state.answer, state.view, state.cursor)
+  state.layout = layout
+  draw(lines, hl)
+  local win = state.win
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    return
+  end
+  -- Too many columns for the float: ask again with as many as fit. Clearly
+  -- more room (two spare columns): ask for more, up to viewer_cols.
+  if state.answer.mode == "grid" and layout.count > 0 and layout.cols > 0 then
+    local width = vim.api.nvim_win_get_width(win)
+    local fit, col_width = M.fit_columns(lines[layout.data_line], layout.pos[1], width)
+    local _, requested = window_size()
+    local more_exist = (state.view.col + layout.cols - 1) < (state.view.cols or 0)
+    local last_end = vim.fn.strdisplaywidth(lines[layout.data_line])
+    if fit < layout.cols then
+      state.fit_cols = math.max(1, fit)
+      state.cursor.c = math.min(state.cursor.c, state.fit_cols)
+      request()
+    elseif more_exist and layout.cols >= requested and col_width > 0 and width - last_end >= 2 * col_width then
+      local max_cols = config.get("viewer_cols", state.source_buf)
+      local grow = math.floor((width - last_end) / col_width) - 1
+      if layout.cols < max_cols and grow > 0 then
+        state.fit_cols = math.min(max_cols, layout.cols + grow)
+        request()
+      end
+    end
+  end
+  -- Rows that do not match the space under the header (the first request
+  -- guesses the header height; a note can make it taller): ask again.
+  if layout.count > 0 and (state.answer.mode == "grid" or state.answer.mode == "list") and not state.refit_rows then
+    local nrows = window_size()
+    local first_row = state.view.row
+    local more_rows = (first_row + layout.count - 1) < M.extent(state.view)
+    if layout.count > nrows or (layout.count < nrows and more_rows) then
+      state.refit_rows = true -- once per answer, so that it cannot loop
+      request()
+    end
+  end
+  if layout.count and layout.count > 0 then
+    local r = math.min(state.cursor.r, layout.count)
+    local pos = layout.pos[r]
+    local col = pos and pos[math.min(state.cursor.c, #pos)] or 0
+    pcall(vim.api.nvim_win_set_cursor, win, { layout.data_line + r - 1, col })
+  end
+  -- Keep the left edge (and so the header) in view.
+  vim.api.nvim_win_call(win, function()
+    vim.fn.winrestview({ leftcol = 0 })
+  end)
 end
 
 local function on_answer(answer)
@@ -344,7 +513,15 @@ local function on_answer(answer)
     end
   end
   state.answer = answer
-  draw(M.render(answer, v))
+  state.refit_rows = false
+  if answer.status == "ok" then
+    -- Keep the cursor on the cells that came back.
+    local count = tonumber(answer.nrows) or tonumber(answer.count) or 0
+    local cols = tonumber(answer.ncols) or 1
+    state.cursor.r = math.max(1, math.min(state.cursor.r, count))
+    state.cursor.c = math.max(1, math.min(state.cursor.c, cols))
+  end
+  redraw()
 end
 
 local function request_now()
@@ -368,7 +545,7 @@ local function request_now()
   })
 end
 
-local function request()
+function request()
   if not valid() then
     return
   end
@@ -381,8 +558,15 @@ local function act(action)
   return function()
     local nrows, ncols = window_size()
     local v = state.view
-    v.row, v.col = M.move(v, action, nrows, ncols)
-    request()
+    local shown = { rows = state.layout and state.layout.count or 1, cols = state.layout and state.layout.cols or 1 }
+    local row, col, cursor = M.step(v, state.cursor, action, shown, nrows, ncols)
+    state.cursor = cursor
+    if row ~= v.row or col ~= v.col then
+      v.row, v.col = row, col
+      request()
+    else
+      redraw() -- only the cursor moved
+    end
   end
 end
 
@@ -403,11 +587,15 @@ local function goto_prompt()
     local nrows, ncols = window_size()
     if v.mode == "list" then
       v.find = { r or 1, c or 1 }
+      state.cursor = { r = 1, c = 1 }
     else
-      v.row = r or v.row
-      v.col = c or v.col
+      local tr = r or (v.row + state.cursor.r - 1)
+      local tc = c or (v.col + state.cursor.c - 1)
+      v.row, v.col = tr, tc
       local row, col = M.move(v, "none", nrows, ncols)
       v.row, v.col = row, col
+      -- The cursor on the target cell; the window was clamped at the edges.
+      state.cursor = { r = math.max(1, tr - row + 1), c = math.max(1, tc - col + 1) }
     end
     request()
   end)
@@ -446,6 +634,7 @@ local function set_keys(buf)
     local v = state.view
     if v.kind == "sparse" then
       state.view = M.toggle_mode(v, v.first_entry)
+      state.cursor = { r = 1, c = 1 }
       request()
     end
   end, "switch list and grid")
@@ -515,12 +704,17 @@ function M.open(name)
     -- The first request asks for the list: sparse values start there, and
     -- Octave answers other values with a grid.
     view = { name = name, mode = "list", row = 1, col = 1, polar = false },
+    cursor = { r = 1, c = 1 }, -- relative to the window
   }
   draw({ name .. ": waiting for Octave..." })
   vim.bo[buf].modifiable = false
   state.win = open_window(buf, "octave-dbg: " .. name)
   vim.wo[state.win].wrap = false
-  vim.wo[state.win].cursorline = false
+  vim.wo[state.win].cursorline = true
+  -- The window always holds exactly what fits; scrolloff/sidescrolloff
+  -- (LazyVim sets 4 and 8) would scroll the header out of view at the edges.
+  vim.wo[state.win].scrolloff = 0
+  vim.wo[state.win].sidescrolloff = 0
   set_keys(buf)
   vim.api.nvim_create_autocmd("BufWipeout", { buffer = buf, once = true, callback = teardown })
   request_now()
@@ -540,7 +734,7 @@ function M.setup()
       -- Not refreshed by itself: only marked, so that the user decides.
       if valid() and state.answer and not state.view.stale then
         state.view.stale = true
-        draw(M.render(state.answer, state.view))
+        redraw()
       end
     end,
   })
