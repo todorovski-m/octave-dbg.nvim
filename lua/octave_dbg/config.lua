@@ -60,6 +60,10 @@ M.defaults = {
   hover_border = "rounded",
   -- Most lines of the help popup shown at once (it can be scrolled).
   help_max_height = 20,
+  -- Key for Octave help on the name under the cursor in Octave buffers,
+  -- with setup_keymap (like <prefix>d). It replaces LSP hover there; false
+  -- keeps the LSP's K.
+  help_key = "K",
 
   -- Value viewer --
   -- Rows (and sparse list entries) and columns requested per window.

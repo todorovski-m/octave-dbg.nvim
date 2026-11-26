@@ -288,6 +288,37 @@ local function set_matlab_keys(bufnr)
   end
 end
 
+-- K (option help_key) for Octave help on the name under the cursor, as with
+-- <prefix>d. Language servers would replace it: LazyVim maps K to LSP hover
+-- about 100 ms after a server attaches (Snacks' keymap timer), so it is
+-- checked again after an attach and whenever an Octave buffer is entered.
+local HELP_DESC = "Octave: help for name under cursor"
+
+local function set_help_key(bufnr)
+  local key = config.get("help_key", bufnr)
+  if key and key ~= "" then
+    vim.keymap.set("n", key, function()
+      M.help()
+    end, { buffer = bufnr, desc = HELP_DESC })
+  end
+end
+
+-- Set K again if something else has mapped it in this buffer.
+local function reassert_help_key(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  local key = config.get("help_key", bufnr)
+  if key and key ~= "" then
+    local m = vim.api.nvim_buf_call(bufnr, function()
+      return vim.fn.maparg(key, "n", false, true)
+    end)
+    if m.desc ~= HELP_DESC then
+      set_help_key(bufnr)
+    end
+  end
+end
+
 local function set_keymaps(bufnr)
   local p = config.get("keymap_prefix", bufnr)
   local function map(mode, lhs, rhs, desc)
@@ -318,6 +349,7 @@ local function set_keymaps(bufnr)
   map("n", "t", M.run_to_cursor, "run to cursor")
   map("n", "k", M.interrupt, "interrupt (Ctrl+C)")
   map("n", "q", M.quit, "quit debugging")
+  set_help_key(bufnr)
   -- Name the group in which-key (LazyVim), if it is installed.
   local ok, wk = pcall(require, "which-key")
   if ok and type(wk.add) == "function" then
@@ -347,6 +379,28 @@ function M.setup(opts)
       set_buffer_maps(ev.buf)
     end,
   })
+  if config.get("setup_keymap") then
+    vim.api.nvim_create_autocmd("BufEnter", {
+      group = group,
+      callback = function(ev)
+        if vim.tbl_contains(filetypes, vim.bo[ev.buf].filetype) then
+          reassert_help_key(ev.buf)
+        end
+      end,
+    })
+    vim.api.nvim_create_autocmd("LspAttach", {
+      group = group,
+      callback = function(ev)
+        if vim.tbl_contains(filetypes, vim.bo[ev.buf].filetype) then
+          for _, ms in ipairs({ 300, 1000 }) do
+            vim.defer_fn(function()
+              reassert_help_key(ev.buf)
+            end, ms)
+          end
+        end
+      end,
+    })
+  end
   -- Buffers that were opened before setup ran.
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(buf) and vim.tbl_contains(filetypes, vim.bo[buf].filetype) then

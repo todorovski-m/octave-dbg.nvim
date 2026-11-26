@@ -115,6 +115,12 @@ LazyVim), the prefix shows as the group "Octave".
 | `V` | value viewer | | |
 | `C` | clc | `x` | close all figures |
 
+`K` (option `help_key`) also shows Octave's help for the name under the
+cursor, like `<leader>od`. In Octave buffers it replaces LSP hover, which
+LazyVim maps to `K` when a language server (such as Copilot) attaches; the
+plugin sets it again shortly after an attach and when an Octave buffer is
+entered. Set `help_key = false` to keep the LSP's `K`.
+
 ### MATLAB keys (`matlab_keys = true`)
 
 | Key | Action | Modes |
@@ -254,6 +260,7 @@ require("octave_dbg").setup({
   hover_max_elements = 1000, -- larger values get a summary
   hover_border = "rounded",
   help_max_height = 20,      -- help popup height (it can be scrolled)
+  help_key = "K",            -- help for the name under the cursor; false: none
   viewer_rows = 50,          -- most rows (or sparse list entries) per window
   viewer_cols = 15,          -- most columns per window
   viewer_timeout = 2000,     -- ms before the viewer says "Octave is busy"

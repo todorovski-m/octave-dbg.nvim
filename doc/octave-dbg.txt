@@ -166,6 +166,7 @@ Defaults: >lua
       hover_max_elements = 1000,
       hover_border = "rounded",
       help_max_height = 20,
+      help_key = "K",
       viewer_rows = 50,
       viewer_cols = 15,
       viewer_timeout = 2000,
@@ -266,6 +267,11 @@ help_max_height                          *octave-dbg-option-help_max_height*
     Most lines of the help popup shown at once. Press the key again to enter
     the popup and scroll.
 
+help_key                                        *octave-dbg-option-help_key*
+    With `setup_keymap`, a key (not under the prefix) for Octave help on the
+    name under the cursor, like <prefix>d. Default "K"; `false` for none.
+    In Octave buffers it replaces LSP hover, see |octave-dbg-keymaps|.
+
 viewer_rows, viewer_cols                      *octave-dbg-option-viewer_rows*
     Largest viewer window: rows (or sparse list entries) and columns. The
     viewer asks for fewer when fewer fit in its window.
@@ -316,6 +322,12 @@ created in buffers of the `filetypes`, under `keymap_prefix`:
 
 When which-key is installed (as in LazyVim), the prefix is named "Octave"
 in Octave buffers. The maps exist only in those buffers.
+
+`K` (option `help_key`) also shows Octave help for the name under the
+cursor. LazyVim maps `K` to LSP hover when a language server attaches (for
+example Copilot, which attaches to every buffer), about 100 ms later. The
+plugin sets its `K` again 300 ms and 1 second after an attach, and when an
+Octave buffer is entered. Set `help_key = false` to keep the LSP's `K`.
 
                                                     *octave-dbg-matlab-keys*
 With `matlab_keys = true`, these keys are created in Octave buffers,
