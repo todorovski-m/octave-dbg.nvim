@@ -65,6 +65,11 @@ M.defaults = {
   -- keeps the LSP's K.
   help_key = "K",
 
+  -- Main script --
+  -- The script that "run" starts when :OctaveDbg main has not set one for
+  -- this folder: a path, a function(bufnr), or vim.b.octave_dbg_main.
+  main = false,
+
   -- Value viewer --
   -- Rows (and sparse list entries) and columns requested per window.
   viewer_rows = 50,

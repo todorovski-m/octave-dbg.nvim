@@ -76,7 +76,9 @@ the status.
 | `repl` | Open or show the REPL (also resets the restart counter) |
 | `send` | Send the cursor line, or a range: `:'<,'>OctaveDbg send` |
 | `cell` | Send the `%%` cell under the cursor |
-| `run` | Save and `run('<absolute path>')` |
+| `run` | Save the changed Octave buffers and run the main script, or the current file |
+| `runfile` | Run the current file, even when a main script is set |
+| `main [path\|clear]` | Set the main script (default: the current file), or forget it |
 | `runto` | Run, or continue, to the cursor line |
 | `interrupt` | Send Ctrl+C to Octave (stops a running command) |
 | `break [N]` | Toggle a breakpoint on the cursor line (or line N) |
@@ -107,12 +109,12 @@ LazyVim), the prefix shows as the group "Octave".
 | `l` | send line | `B` | clear all breakpoints |
 | `s` | send selection (visual) | `n` | step |
 | `c` | send cell | `i` | step in |
-| `f` | run file | `O` | step out |
+| `f` | run main script (or this file) | `O` | step out |
 | `w` | whos | `r` | continue |
 | `v` | variables panel | `t` | run to cursor |
 | `h` | hover | `k` | interrupt (Ctrl+C) |
 | `d` | help for name under cursor | `q` | quit debugging |
-| `V` | value viewer | | |
+| `V` | value viewer | `F` | run this file |
 | `C` | clc | `x` | close all figures |
 
 `K` (option `help_key`) also shows Octave's help for the name under the
@@ -153,6 +155,33 @@ Some keys depend on the terminal and the system:
 - **macOS** sends F-keys only with `Fn` unless *System Settings → Keyboard
   → "Use F1, F2, etc. keys as standard function keys"* is on, and uses F11
   for "Show Desktop" by default.
+
+## Main script
+
+When you work on a function that a script calls, set the script as the
+main script once: open `main.m` and run `:OctaveDbg main` (or
+`:OctaveDbg main path/to/main.m` from anywhere). From then on, F5,
+`<leader>of` and `:OctaveDbg run` run `main.m` from whichever Octave file
+you are in, and breakpoints in the function stop there. Run to cursor
+(`Ctrl+F10`) in the function sets its temporary breakpoint there and runs
+`main.m`. `<leader>oF` (`:OctaveDbg runfile`) runs the current file instead.
+
+- **Remembered per folder.** The main script is stored for its own folder
+  and the folder it was set from, in Neovim's data folder
+  (`stdpath("data")/octave-dbg/main.json`), so no project file changes. From
+  the current file, the folders are searched upwards, so a function in
+  `lib/` finds the main script of the project. `:OctaveDbg status` shows it;
+  `:OctaveDbg main clear` forgets it.
+- **Only changed files are saved.** Before a run, every Octave buffer with
+  unsaved changes is written; files without changes keep their
+  modification time, so synced folders see no needless changes.
+- **A function can be the main program.** Without a main script, a function
+  file runs too: it is called by name without arguments (so defaults for
+  `nargin == 0` take effect), and `ans` is shown, as with F5 in MATLAB. A
+  script runs with `run('<absolute path>')`. A file counts as a function file
+  when its first line of code starts with `function`.
+- The option `main` gives a main script where none was set: a path, a
+  `function(bufnr)`, or `vim.b.octave_dbg_main`.
 
 ## Debugging view
 
@@ -261,6 +290,7 @@ require("octave_dbg").setup({
   hover_border = "rounded",
   help_max_height = 20,      -- help popup height (it can be scrolled)
   help_key = "K",            -- help for the name under the cursor; false: none
+  main = false,              -- main script when :OctaveDbg main set none: path or function(bufnr)
   viewer_rows = 50,          -- most rows (or sparse list entries) per window
   viewer_cols = 15,          -- most columns per window
   viewer_timeout = 2000,     -- ms before the viewer says "Octave is busy"
@@ -281,7 +311,8 @@ uses the normal prompt to see that a debug session is over.
 ```lua
 local od = require("octave_dbg")
 od.repl() od.send(text) od.send_line() od.send_selection() od.send_cell()
-od.run() od.run_or_continue() od.run_to_cursor() od.interrupt()
+od.run() od.run_file() od.run_or_continue() od.run_to_cursor() od.interrupt()
+od.set_main(path?) od.clear_main() od.get_main()
 od.toggle_breakpoint(line?) od.clear_breakpoints()
 od.step() od.step_in() od.step_out() od.continue() od.quit()
 od.whos() od.clc() od.close_figures() od.status() od.debug()
@@ -304,9 +335,11 @@ Notes on Octave's debugger that shape the plugin (Octave 11.1):
   `addpath('<absolute folder>'); [~] = dbstop('<name>', '<line>');`, so file
   names must be valid Octave identifiers (no `-`, no leading digit). The
   `[~] =` keeps `dbstop` from overwriting `ans` with the line number.
-- **Scripts.** A breakpoint in a plain script fires when the script is
-  started with `run('/abs/path/script.m')`, which is what `:OctaveDbg run`
-  sends.
+- **Scripts and functions.** A breakpoint in a plain script fires when the
+  script is started with `run('/abs/path/script.m')`, which is what
+  `:OctaveDbg run` sends for a script. Breakpoints in a function fire
+  whichever script calls it, because `dbstop` adds the function's folder to
+  the load path. A function file is run by calling it by name.
 - **The stop location** is printed as
   `stopped in <name> at line <n> [<absolute path>]`, followed by the
   `debug>` prompt. The marker parses this line.

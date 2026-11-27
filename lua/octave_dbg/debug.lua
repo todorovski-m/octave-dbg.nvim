@@ -16,6 +16,8 @@ local repl = require("octave_dbg.repl")
 local signs = require("octave_dbg.signs")
 local bpstatus = require("octave_dbg.bpstatus")
 local marker = require("octave_dbg.marker")
+local main = require("octave_dbg.main")
+local config = require("octave_dbg.config")
 
 local M = {}
 
@@ -367,17 +369,45 @@ function M.list()
   return out
 end
 
---- Save and run the file of a buffer with run('<absolute path>').
-function M.run(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local path = file_of(bufnr)
+-- Save the Octave buffers that have unsaved changes, and only those: an
+-- unchanged file keeps its modification time (no needless sync).
+local function save_modified_octave_buffers()
+  local filetypes = config.get("filetypes")
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].modified and vim.bo[buf].buftype == ""
+      and vim.api.nvim_buf_get_name(buf) ~= "" and vim.tbl_contains(filetypes, vim.bo[buf].filetype) then
+      save_if_modified(buf)
+    end
+  end
+end
+
+--- What "run" starts for a buffer: the main script, or the buffer's file
+--- (with `this`, always the buffer's file). Returns the path and the Octave
+--- command, or nil.
+local function run_target(bufnr, this)
+  local path = (not this and main.get(bufnr)) or file_of(bufnr)
   if not path then
     vim.notify("octave-dbg: buffer has no file name", vim.log.levels.WARN)
+    return nil
+  end
+  return path, main.run_command(path, main.head(path))
+end
+
+--- Save the changed Octave buffers, then run the main script (see main.lua),
+--- or the file of the buffer when no main script is set or `opts.this`.
+--- A script runs with run('<absolute path>'); a function file is called by
+--- name, without arguments.
+---@param bufnr integer|nil
+---@param opts table|nil { this = true }: the buffer's own file
+function M.run(bufnr, opts)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local _, cmd = run_target(bufnr, opts and opts.this)
+  if not cmd then
     return
   end
-  save_if_modified(bufnr)
+  save_modified_octave_buffers()
   after_resends(function()
-    repl.send("run(" .. repl.quote(path) .. ")", { raw = true })
+    repl.send(cmd, { raw = true })
   end)
 end
 
@@ -400,8 +430,15 @@ function M.run_to_cursor(bufnr)
   if not path then
     return
   end
-  save_if_modified(bufnr)
-  local go = marker.current() and "dbcont" or ("run(" .. repl.quote(path) .. ")")
+  local go = "dbcont"
+  if not marker.current() then
+    local _, cmd = run_target(bufnr)
+    if not cmd then
+      return
+    end
+    go = cmd
+  end
+  save_modified_octave_buffers()
   after_resends(function()
     if not repl.ensure() then
       return

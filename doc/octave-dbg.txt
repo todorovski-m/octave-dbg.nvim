@@ -73,10 +73,22 @@ a subcommand, it runs `status`.
     delimiter is a cell too.
 
 :OctaveDbg run                                              *:OctaveDbg-run*
-    Save the buffer if it is modified, then send
-    `run('<absolute path>')`. For a script with breakpoints, this starts a
-    debug session. Right after a save, it waits until the breakpoints that
-    Octave dropped on the save have been sent again (about 1.1 seconds).
+    Save the Octave buffers that have unsaved changes (only those), then run
+    the main script (see |octave-dbg-main|), or the current file when no
+    main script is set. A script runs with `run('<absolute path>')`; a
+    function file is called by name without arguments. For a script with
+    breakpoints, this starts a debug session. Right after a save, it waits
+    until the breakpoints that Octave dropped on the save have been sent
+    again (about 1.1 seconds).
+
+:OctaveDbg runfile                                      *:OctaveDbg-runfile*
+    Like |:OctaveDbg-run|, but always the current file.
+
+:OctaveDbg main [path]                                     *:OctaveDbg-main*
+:OctaveDbg main clear
+    Set the main script: [path], or the current file. With "clear", forget
+    the main script that applies to the current file. See
+    |octave-dbg-main|.
 
 :OctaveDbg runto                                          *:OctaveDbg-runto*
     Run the file, or continue when the debugger is stopped, until the cursor
@@ -167,6 +179,7 @@ Defaults: >lua
       hover_border = "rounded",
       help_max_height = 20,
       help_key = "K",
+      main = false,
       viewer_rows = 50,
       viewer_cols = 15,
       viewer_timeout = 2000,
@@ -272,6 +285,10 @@ help_key                                        *octave-dbg-option-help_key*
     name under the cursor, like <prefix>d. Default "K"; `false` for none.
     In Octave buffers it replaces LSP hover, see |octave-dbg-keymaps|.
 
+main                                                *octave-dbg-option-main*
+    The main script where |:OctaveDbg-main| has set none: a path, a
+    `function(bufnr)`, or `vim.b.octave_dbg_main`. Default `false`.
+
 viewer_rows, viewer_cols                      *octave-dbg-option-viewer_rows*
     Largest viewer window: rows (or sparse list entries) and columns. The
     viewer asks for fewer when fewer fit in its window.
@@ -302,7 +319,8 @@ created in buffers of the `filetypes`, under `keymap_prefix`:
     l     n       send line
     s     x       send selection
     c     n       send cell
-    f     n       run file
+    f     n       run main script (or this file)
+    F     n       run this file
     w     n       whos
     v     n       toggle variables panel
     h     n       show variable under cursor
@@ -386,6 +404,14 @@ send_cell()                                       *octave_dbg.send_cell()*
 run()                                                   *octave_dbg.run()*
     Same as |:OctaveDbg-run|.
 
+run_file()                                         *octave_dbg.run_file()*
+    Same as |:OctaveDbg-runfile|.
+
+set_main([{path}])                                 *octave_dbg.set_main()*
+clear_main()                                     *octave_dbg.clear_main()*
+get_main()                                         *octave_dbg.get_main()*
+    Set, forget, or return the main script for the current file.
+
 toggle_breakpoint([{line}])               *octave_dbg.toggle_breakpoint()*
 clear_breakpoints()                       *octave_dbg.clear_breakpoints()*
     Same as |:OctaveDbg-break| and |:OctaveDbg-clear|.
@@ -442,6 +468,24 @@ Example: >lua
     vim.keymap.set("n", "<F11>", od.step_in)
     vim.keymap.set("n", "<S-F11>", od.step_out)
 <
+                                                           *octave-dbg-main*
+Main script ~
+Working on a function that a script calls, set the script once with
+|:OctaveDbg-main|. Then F5, <prefix>f and |:OctaveDbg-run| run it from
+whichever Octave file you are in, and breakpoints in the function stop
+there; run to cursor in the function runs the main script too. <prefix>F
+(|:OctaveDbg-runfile|) runs the current file instead.
+
+The main script is remembered for its folder and the folder it was set
+from, in `stdpath("data")/octave-dbg/main.json`; from the current file, the
+folders are searched upwards, then from the working directory, then the
+option `main` is used. Before a run, only the Octave buffers with unsaved
+changes are written, so unchanged files keep their modification time.
+Without a main script, a function file runs too: it is called by name
+without arguments (defaults for `nargin == 0` take effect, and `ans` is
+shown). A file is a function file when its first line of code starts with
+`function`.
+
 ==============================================================================
 6. CURRENT-LINE MARKER                                   *octave-dbg-marker*
 

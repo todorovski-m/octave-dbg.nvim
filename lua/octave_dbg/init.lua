@@ -7,6 +7,7 @@ local marker = require("octave_dbg.marker")
 local panel = require("octave_dbg.panel")
 local hover = require("octave_dbg.hover")
 local viewer = require("octave_dbg.viewer")
+local main = require("octave_dbg.main")
 
 local M = {}
 
@@ -24,8 +25,31 @@ M.send_selection = repl.send_selection
 M.send_cell = function()
   repl.send_cell(0)
 end
+--- Save the changed Octave buffers and run the main script (see main()),
+--- or the current file when no main script is set.
 M.run = function()
   dbg.run(0)
+end
+--- Run the current file, even when a main script is set.
+M.run_file = function()
+  dbg.run(0, { this = true })
+end
+--- Set the main script: `path`, or the current file. Remembered per folder.
+M.set_main = function(path)
+  local m = main.set(vim.api.nvim_get_current_buf(), path)
+  if m then
+    vim.notify("octave-dbg: main script: " .. vim.fn.fnamemodify(m, ":~"), vim.log.levels.INFO)
+  end
+  return m
+end
+--- Forget the main script that applies to the current file.
+M.clear_main = function()
+  local m = main.clear(vim.api.nvim_get_current_buf())
+  vim.notify(m and ("octave-dbg: main script cleared: " .. vim.fn.fnamemodify(m, ":~")) or "octave-dbg: no main script is set here", vim.log.levels.INFO)
+end
+--- The main script for the current file, or nil.
+M.get_main = function()
+  return main.get(vim.api.nvim_get_current_buf())
 end
 M.toggle_breakpoint = function(line)
   dbg.toggle(vim.api.nvim_get_current_buf(), line)
@@ -88,6 +112,8 @@ function M.status_lines()
     ("Automatic restarts: %d/%d"):format(info.restarts, info.max_restarts),
     "Commands sent: " .. #info.sent,
   }
+  local m = main.get(vim.api.nvim_get_current_buf())
+  table.insert(lines, "Main script: " .. (m and vim.fn.fnamemodify(m, ":~") or "none (run starts the current file)"))
   local stop = marker.current()
   table.insert(
     lines,
@@ -149,7 +175,25 @@ M.subcommands = {
     end,
   },
   cell = { desc = "Send the cell under the cursor", fn = M.send_cell },
-  run = { desc = "Save and run the current file", fn = M.run },
+  run = { desc = "Run the main script, or the current file", fn = M.run },
+  runfile = { desc = "Run the current file, even when a main script is set", fn = M.run_file },
+  main = {
+    desc = "Set the main script (a path or the current file), or 'clear'",
+    fn = function(cmd)
+      if cmd.args[1] == "clear" then
+        M.clear_main()
+      elseif cmd.args[1] then
+        M.set_main(cmd.args[1])
+      else
+        local current = M.get_main()
+        if current and current == vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":p") then
+          vim.notify("octave-dbg: main script: " .. vim.fn.fnamemodify(current, ":~"), vim.log.levels.INFO)
+        else
+          M.set_main()
+        end
+      end
+    end,
+  },
   ["break"] = {
     desc = "Toggle a breakpoint on the cursor line (or the given line)",
     fn = function(cmd)
@@ -196,7 +240,18 @@ end
 --- Completion for :OctaveDbg.
 function M.complete(arglead, cmdline)
   local before = cmdline:gsub("^%s*%S+%s*", "", 1)
-  -- Only the first argument is completed.
+  -- The argument of "main": "clear", folders and .m files.
+  local sub = before:match("^(%S+)%s")
+  if sub == "main" and not before:match("^%S+%s+%S+%s") then
+    local out = vim.startswith("clear", arglead) and { "clear" } or {}
+    for _, f in ipairs(vim.fn.getcompletion(arglead, "file")) do
+      if f:match("/$") or f:match("%.m$") then
+        table.insert(out, f)
+      end
+    end
+    return out
+  end
+  -- Otherwise only the first argument is completed.
   if before:find("%s") then
     return {}
   end
@@ -328,7 +383,8 @@ local function set_keymaps(bufnr)
   map("n", "l", M.send_line, "send line")
   map("x", "s", M.send_selection, "send selection")
   map("n", "c", M.send_cell, "send cell")
-  map("n", "f", M.run, "run file")
+  map("n", "f", M.run, "run main script (or this file)")
+  map("n", "F", M.run_file, "run this file")
   map("n", "w", M.whos, "whos")
   map("n", "v", M.panel, "toggle variables panel")
   map("n", "V", function()
