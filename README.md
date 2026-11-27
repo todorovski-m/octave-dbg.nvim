@@ -426,8 +426,25 @@ nvim --headless --noplugin -u test/minimal_init.lua \
   -c "PlenaryBustedDirectory test { minimal_init = 'test/minimal_init.lua' }"
 ```
 
-`test/demo_script.m` (a script with two cells) and `test/demo_add.m` (a
-function it calls) are small files for manual tests. `test/view_dense.m`,
+End-to-end tests drive Neovim and a real Octave (`octave` on `PATH`; no
+plenary needed). They run in a temporary folder with their own
+`XDG_DATA_HOME`, so the repository and your Neovim data stay untouched, and
+the exit code is 0 only when every check passed:
+
+```sh
+test/e2e/run.sh              # all suites, a few minutes
+test/e2e/run.sh hover keys   # some suites
+```
+
+The suites are `stage1` (REPL, run, breakpoints, restart, health), `stage2`
+(marker, panel), `bpsync` (breakpoints kept in sync with `dbstatus`),
+`hover`, `keys` (MATLAB keys, run to cursor, interrupt, help), `viewer`,
+`viewer_wiring`, `main` and `main_restart` (the main script).
+
+For manual tests, `test/demo_script.m` (a script with two cells) and
+`test/demo_add.m` (a function it calls) are small files; `test/main_demo/`
+is a small project with a main script, a function with defaults and a
+function in `lib/`, with the steps in `main.m`; `test/view_dense.m`,
 `test/view_sparse.m`, `test/view_complex.m` and `test/view_struct.m` set up
 values for the viewer and say what to try.
 
